@@ -73,8 +73,27 @@ const PatientMessages = () => {
     if (!socket) return;
 
     const handleNewMessage = (msg) => {
+      setConversations(prev => prev.map(c => {
+        // If the message is from/to a partner in our active conversations list, update the snippet
+        if (c.partner?._id === msg.sender || c.partner?._id === msg.receiver) {
+          const isFromPartner = c.partner?._id === msg.sender;
+          const isActive = activeConvo && c.partner?._id === activeConvo.partner._id;
+
+          let unreadInc = 0;
+          if (isFromPartner && !isActive) unreadInc = 1;
+
+          return { ...c, unreadCount: (c.unreadCount || 0) + unreadInc, lastMessage: msg };
+        }
+        return c;
+      }));
+
       if (activeConvo && (msg.sender === activeConvo.partner._id || msg.receiver === activeConvo.partner._id)) {
         setMessages(prev => [...prev, msg]);
+
+        // If we received this while active in the chat, mark it as read immediately in the backend
+        if (msg.sender === activeConvo.partner._id) {
+          messageAPI.markAsRead(activeConvo.partner._id).catch(() => { });
+        }
       }
     };
 
@@ -144,8 +163,12 @@ const PatientMessages = () => {
                         className={`flex items-center gap-3 p-3 cursor-pointer transition-colors
                           ${activeConvo?.partner?._id === convo.partner?._id ? 'bg-primary-light' : 'hover:bg-gray-50'}`}
                       >
-                        <div className="w-10 h-10 rounded-xl bg-primary-light flex items-center justify-center text-xl flex-shrink-0">
-                          {convo.partner?.role === 'doctor' ? '👩‍⚕️' : '👤'}
+                        <div className="w-10 h-10 rounded-xl bg-primary-light flex items-center justify-center text-xl flex-shrink-0 overflow-hidden">
+                          {convo.partner?.profilePic ? (
+                            <img src={convo.partner.profilePic} alt={convo.partner.name} className="w-full h-full object-cover" />
+                          ) : (
+                            convo.partner?.role === 'doctor' ? '👩‍⚕️' : '👤'
+                          )}
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-semibold text-text-primary truncate">{convo.partner?.name}</p>
@@ -175,8 +198,12 @@ const PatientMessages = () => {
                         >
                           <ArrowLeft className="w-5 h-5" />
                         </button>
-                        <div className="w-10 h-10 rounded-xl bg-primary-light flex items-center justify-center text-xl">
-                          {activeConvo.partner?.role === 'doctor' ? '👩‍⚕️' : '👤'}
+                        <div className="w-10 h-10 rounded-xl bg-primary-light flex items-center justify-center text-xl overflow-hidden">
+                          {activeConvo.partner?.profilePic ? (
+                            <img src={activeConvo.partner.profilePic} alt={activeConvo.partner.name} className="w-full h-full object-cover" />
+                          ) : (
+                            activeConvo.partner?.role === 'doctor' ? '👩‍⚕️' : '👤'
+                          )}
                         </div>
                         <div>
                           <p className="font-semibold text-text-primary text-sm">{activeConvo.partner?.name}</p>

@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Calendar, BookOpen, MessageCircle, Settings,
-  Video, MessageSquare, Clock, Check, Loader2, CreditCard, Star, User as UserIcon
+  Video, Clock, Check, Loader2, CreditCard, Star, User as UserIcon
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Sidebar from '../../components/layout/Sidebar';
@@ -25,7 +25,6 @@ const BookAppointment = () => {
   const [step, setStep] = useState(1);
   const [selectedDate, setSelectedDate] = useState(null);
   const [selectedTime, setSelectedTime] = useState(null);
-  const [sessionType, setSessionType] = useState('video');
   const [availableSlots, setAvailableSlots] = useState([]);
   const [doctors, setDoctors] = useState([]);
   const [selectedDoctor, setSelectedDoctor] = useState(null);
@@ -118,7 +117,7 @@ const BookAppointment = () => {
         doctorId: selectedDoctor._id,
         date: selectedDate.toISOString().split('T')[0],
         time: selectedTime,
-        type: sessionType,
+        type: 'video',
       });
 
       // Step 2: Load Razorpay
@@ -135,7 +134,7 @@ const BookAppointment = () => {
         amount: data.razorpayOrder.amount,
         currency: data.razorpayOrder.currency,
         name: 'YourTherapist',
-        description: `${sessionType === 'video' ? 'Video' : 'Chat'} Session with Dr. ${doctorInfo?.name || 'Therapist'}`,
+        description: `Video Session with Dr. ${doctorInfo?.name || 'Therapist'}`,
         order_id: data.razorpayOrder.id,
         handler: async (response) => {
           // Step 4: Verify payment
@@ -177,7 +176,7 @@ const BookAppointment = () => {
     }
   };
 
-  const fee = sessionType === 'chat' ? (doctorInfo?.chatFee || 800) : (doctorInfo?.consultationFee || 1500);
+  const fee = doctorInfo?.consultationFee || 1500;
 
   return (
     <div className="min-h-screen bg-background">
@@ -192,18 +191,18 @@ const BookAppointment = () => {
 
           {/* Progress Steps */}
           <div className="flex items-center justify-center gap-3 mb-8">
-            {['Doctor', 'Date & Time', 'Session Type', bookingSuccess ? 'Confirmed' : 'Payment'].map((label, i) => (
+            {['Doctor', 'Date & Time', bookingSuccess ? 'Confirmed' : 'Payment'].map((label, i) => (
               <div key={label} className="flex items-center gap-2">
                 <div className={`w-8 h-8 rounded-xl flex items-center justify-center text-sm font-bold transition-all ${step > i + 1 ? 'bg-success text-white' :
-                    step === i + 1 ? 'bg-primary text-white shadow-glow' :
-                      'bg-gray-100 text-text-secondary'
+                  step === i + 1 ? 'bg-primary text-white shadow-glow' :
+                    'bg-gray-100 text-text-secondary'
                   }`}>
                   {step > i + 1 ? <Check className="w-4 h-4" /> : i + 1}
                 </div>
                 <span className={`text-sm font-medium hidden sm:block ${step === i + 1 ? 'text-primary' : 'text-text-secondary'}`}>
                   {label}
                 </span>
-                {i < 3 && <div className={`w-6 h-0.5 ${step > i + 1 ? 'bg-success' : 'bg-gray-200'}`} />}
+                {i < 2 && <div className={`w-6 h-0.5 ${step > i + 1 ? 'bg-success' : 'bg-gray-200'}`} />}
               </div>
             ))}
           </div>
@@ -319,33 +318,25 @@ const BookAppointment = () => {
                   disabled={!selectedDate || !selectedTime}
                   className="btn-primary flex-1 disabled:opacity-50"
                 >
-                  Continue
+                  Continue to Payment
                 </button>
               </div>
             </motion.div>
           )}
 
-          {/* Step 3: Session Type + Pay */}
+          {/* Step 3: Confirm & Pay */}
           {step === 3 && (
             <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="card">
-              <h2 className="font-display font-bold text-lg text-text-primary mb-5">Session Type</h2>
-              <div className="grid grid-cols-2 gap-4 mb-6">
-                {[
-                  { type: 'video', icon: Video, label: 'Video Call', desc: 'Face-to-face session via HD video', price: doctorInfo?.consultationFee || 1500 },
-                  { type: 'chat', icon: MessageSquare, label: 'Chat Session', desc: 'Text-based therapy session', price: doctorInfo?.chatFee || 800 },
-                ].map((option) => (
-                  <button
-                    key={option.type}
-                    onClick={() => setSessionType(option.type)}
-                    className={`p-5 rounded-2xl border-2 transition-all text-left
-                      ${sessionType === option.type ? 'border-primary bg-primary-light shadow-glow' : 'border-gray-100 hover:border-primary/30'}`}
-                  >
-                    <option.icon className={`w-8 h-8 mb-3 ${sessionType === option.type ? 'text-primary' : 'text-text-secondary'}`} />
-                    <p className="font-semibold text-text-primary">{option.label}</p>
-                    <p className="text-xs text-text-secondary mt-1">{option.desc}</p>
-                    <p className="text-lg font-bold text-primary mt-2">₹{option.price}</p>
-                  </button>
-                ))}
+              <h2 className="font-display font-bold text-lg text-text-primary mb-5">Confirm & Pay</h2>
+
+              {/* Session Type Badge */}
+              <div className="flex items-center gap-3 p-4 rounded-2xl border-2 border-primary bg-primary-light mb-6">
+                <Video className={`w-8 h-8 text-primary`} />
+                <div>
+                  <p className="font-semibold text-text-primary">Video Call Session</p>
+                  <p className="text-xs text-text-secondary">Face-to-face session via HD video</p>
+                </div>
+                <p className="text-lg font-bold text-primary ml-auto">₹{fee}</p>
               </div>
 
               {/* Booking Summary */}
@@ -368,7 +359,7 @@ const BookAppointment = () => {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-text-secondary">Type</span>
-                    <span className="font-semibold text-text-primary capitalize">{sessionType}</span>
+                    <span className="font-semibold text-text-primary">Video Call</span>
                   </div>
                   <div className="border-t pt-2 mt-2 flex justify-between">
                     <span className="font-bold text-text-primary">Total</span>
@@ -397,7 +388,7 @@ const BookAppointment = () => {
             </motion.div>
           )}
 
-          {/* Step 4: Success */}
+          {/* Step 4 (mapped to 4): Success */}
           {step === 4 && bookingSuccess && (
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="card text-center">
               <div className="w-20 h-20 rounded-full bg-success/10 flex items-center justify-center mx-auto mb-5">

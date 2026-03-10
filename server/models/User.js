@@ -13,6 +13,7 @@ const userSchema = new mongoose.Schema({
   address: { type: String, default: '' },
   emergencyContact: { type: String, default: '' },
   isActive: { type: Boolean, default: true },
+  profileCompleted: { type: Boolean, default: false },
   isVerified: { type: Boolean, default: false },
   otp: { type: String },
   otpExpiry: { type: Date },
@@ -25,7 +26,7 @@ const userSchema = new mongoose.Schema({
   consultationFee: { type: Number, default: 1500 },
   chatFee: { type: Number, default: 800 },
   availableSlots: [{
-    day: { type: String, enum: ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'] },
+    day: { type: String, enum: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'] },
     startTime: String,
     endTime: String,
   }],
@@ -34,18 +35,18 @@ const userSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 // Hash password
-userSchema.pre('save', async function() {
+userSchema.pre('save', async function () {
   if (!this.isModified('password')) return;
   this.password = await bcrypt.hash(this.password, 12);
 });
 
 // Compare password
-userSchema.methods.comparePassword = async function(candidatePassword) {
+userSchema.methods.comparePassword = async function (candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.password);
 };
 
 // Remove sensitive fields from JSON output
-userSchema.methods.toJSON = function() {
+userSchema.methods.toJSON = function () {
   const obj = this.toObject();
   delete obj.password;
   delete obj.otp;

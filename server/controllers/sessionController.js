@@ -1,6 +1,7 @@
 import SessionNote from '../models/SessionNote.js';
 import QuestionnaireTemplate from '../models/QuestionnaireTemplate.js';
 import QuestionnaireResponse from '../models/QuestionnaireResponse.js';
+import Appointment from '../models/Appointment.js';
 
 // ========== SESSION NOTES ==========
 
@@ -85,6 +86,35 @@ export const getQuestionnaireTemplates = async (req, res, next) => {
   }
 };
 
+// @desc    Get questionnaire templates by disease name
+// @route   GET /api/sessions/questionnaires/by-disease/:diseaseName
+export const getQuestionnairesByDisease = async (req, res, next) => {
+  try {
+    const templates = await QuestionnaireTemplate.find({
+      doctor: req.user._id,
+      diseaseName: { $regex: req.params.diseaseName, $options: 'i' },
+      isActive: true,
+    }).sort({ createdAt: -1 });
+    res.json({ templates });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Get unique disease names for this doctor
+// @route   GET /api/sessions/questionnaires/diseases
+export const getDiseaseList = async (req, res, next) => {
+  try {
+    const diseases = await QuestionnaireTemplate.distinct('diseaseName', {
+      doctor: req.user._id,
+      isActive: true,
+    });
+    res.json({ diseases });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // ========== QUESTIONNAIRE RESPONSES ==========
 
 // @desc    Submit questionnaire response
@@ -123,10 +153,40 @@ export const getQuestionnaireResponses = async (req, res, next) => {
     const responses = await QuestionnaireResponse.find({
       appointment: req.params.appointmentId,
     })
-      .populate('template', 'title category')
+      .populate('template', 'title category diseaseName testName')
       .sort({ createdAt: -1 });
 
     res.json({ responses });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ========== SESSION DETAIL ==========
+
+// @desc    Get full detail for a session/appointment
+// @route   GET /api/sessions/detail/:appointmentId
+export const getSessionDetail = async (req, res, next) => {
+  try {
+    const appointmentId = req.params.appointmentId;
+
+    const [appointment, sessionNote, questionnaireResponses] = await Promise.all([
+      Appointment.findById(appointmentId).populate('doctor', 'name specialization profilePic').populate('patient', 'name email profilePic'),
+      SessionNote.findOne({ appointment: appointmentId }),
+      QuestionnaireResponse.find({ appointment: appointmentId })
+        .populate('template', 'title category diseaseName testName questions')
+        .sort({ createdAt: -1 }),
+    ]);
+
+    if (!appointment) {
+      return res.status(404).json({ message: 'Appointment not found' });
+    }
+
+    res.json({
+      appointment,
+      sessionNote,
+      questionnaireResponses,
+    });
   } catch (error) {
     next(error);
   }

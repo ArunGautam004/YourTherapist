@@ -112,6 +112,7 @@ export const verifyOTP = async (req, res, next) => {
 
     // Mark as verified and clear OTP
     user.isVerified = true;
+    user.profileCompleted = false;
     user.otp = undefined;
     user.otpExpiry = undefined;
     user.lastLogin = new Date();
@@ -234,6 +235,14 @@ export const updateProfile = async (req, res, next) => {
       if (req.body[field] !== undefined) updates[field] = req.body[field];
     });
 
+    // Auto-mark profile as completed when phone and profilePic are set
+    const currentUser = await User.findById(req.user._id);
+    const finalPhone = updates.phone || currentUser.phone;
+    const finalPic = updates.profilePic || currentUser.profilePic;
+    if (finalPhone && finalPic) {
+      updates.profileCompleted = true;
+    }
+
     const user = await User.findByIdAndUpdate(req.user._id, updates, { new: true, runValidators: true });
     res.json({ user });
   } catch (error) {
@@ -262,7 +271,7 @@ export const googleLogin = async (req, res, next) => {
 
     if (!user) {
       const randomPassword = Math.random().toString(36).slice(-10) + Math.random().toString(36).slice(-10);
-      
+
       user = await User.create({
         name,
         email,

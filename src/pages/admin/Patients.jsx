@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard, Users, Calendar, BarChart3, MessageCircle, Settings,
   Search, AlertTriangle, TrendingUp, TrendingDown, Minus,
-  Video, FileText
+  Video, FileText, ClipboardList, ChevronDown, ChevronUp, Save, Loader2, X
 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import Sidebar from '../../components/layout/Sidebar';
 import { patientAPI, sessionAPI, messageAPI } from '../../services/api';
 
@@ -16,6 +17,12 @@ const AdminPatients = () => {
   const [patientDetail, setPatientDetail] = useState(null);
   const [loading, setLoading] = useState(true);
   const [totalUnread, setTotalUnread] = useState(0);
+  // Session detail states
+  const [expandedApt, setExpandedApt] = useState(null);
+  const [aptDetail, setAptDetail] = useState({});
+  const [aptDetailLoading, setAptDetailLoading] = useState(null);
+  const [reportText, setReportText] = useState('');
+  const [savingReport, setSavingReport] = useState(false);
 
   const dynamicLinks = [
     { name: 'Dashboard', path: '/admin/dashboard', icon: LayoutDashboard },
@@ -52,11 +59,61 @@ const AdminPatients = () => {
 
   const handleSelectPatient = async (patient) => {
     setSelectedPatient(patient);
+    setExpandedApt(null);
+    setAptDetail({});
     try {
       const { data } = await patientAPI.getById(patient._id);
       setPatientDetail(data);
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleExpandApt = async (aptId) => {
+    if (expandedApt === aptId) {
+      setExpandedApt(null);
+      return;
+    }
+    setExpandedApt(aptId);
+    if (aptDetail[aptId]) return; // already loaded
+    setAptDetailLoading(aptId);
+    try {
+      const { data } = await sessionAPI.getSessionDetail(aptId);
+      setAptDetail(prev => ({ ...prev, [aptId]: data }));
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setAptDetailLoading(null);
+    }
+  };
+
+  const handleSaveReport = async (aptId, patientId) => {
+    if (!reportText.trim()) {
+      toast.error('Please enter a report');
+      return;
+    }
+    setSavingReport(true);
+    try {
+      const existing = aptDetail[aptId]?.sessionNote;
+      if (existing?._id) {
+        await sessionAPI.updateNote(existing._id, { report: reportText.trim() });
+      } else {
+        await sessionAPI.createNote({
+          appointment: aptId,
+          patient: patientId,
+          report: reportText.trim(),
+          isSharedWithPatient: true,
+        });
+      }
+      toast.success('Report saved!');
+      // Refresh detail
+      const { data } = await sessionAPI.getSessionDetail(aptId);
+      setAptDetail(prev => ({ ...prev, [aptId]: data }));
+      setReportText('');
+    } catch (err) {
+      toast.error('Failed to save report');
+    } finally {
+      setSavingReport(false);
     }
   };
 
@@ -186,34 +243,128 @@ const AdminPatients = () => {
                           <tr className="text-xs font-semibold text-text-secondary uppercase tracking-wider border-b border-gray-100">
                             <th className="pb-3 px-2">Date</th>
                             <th className="pb-3 px-2">Time</th>
-                            <th className="pb-3 px-2">Type</th>
                             <th className="pb-3 px-2 text-right">Status</th>
+                            <th className="pb-3 px-2 text-right w-8"></th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-50">
-                          {(patientDetail?.appointments || []).map((apt, i) => (
-                            <tr key={apt._id || i} className="group hover:bg-gray-50/50 transition-colors">
-                              <td className="py-3 px-2 whitespace-nowrap">
-                                <span className="text-sm font-medium text-text-primary">
-                                  {new Date(apt.date).toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' })}
-                                </span>
-                              </td>
-                              <td className="py-3 px-2 text-sm text-text-secondary">{apt.time}</td>
-                              <td className="py-3 px-2">
-                                <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-text-secondary capitalize">
-                                  {apt.type}
-                                </span>
-                              </td>
-                              <td className="py-3 px-2 text-right">
-                                <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full uppercase
-                                  ${apt.status === 'completed' ? 'bg-success/10 text-success' :
-                                    apt.status === 'scheduled' ? 'bg-primary/10 text-primary' :
-                                      'bg-gray-100 text-text-secondary'}`}>
-                                  {apt.status}
-                                </span>
-                              </td>
-                            </tr>
-                          ))}
+                          {(patientDetail?.appointments || []).map((apt, i) => {
+                            const aptId = apt._id || `apt-${i}`;
+                            const detail = aptDetail[aptId];
+                            const isExpanded = expandedApt === aptId;
+                            const isLoading = aptDetailLoading === aptId;
+                            return (
+                              <>
+                                <tr
+                                  key={aptId}
+                                  className="group hover:bg-gray-50/50 transition-colors cursor-pointer"
+                                  onClick={() => handleExpandApt(aptId)}
+                                >
+                                  <td className="py-3 px-2 whitespace-nowrap">
+                                    <span className="text-sm font-medium text-text-primary">
+                                      {new Date(apt.date).toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                    </span>
+                                  </td>
+                                  <td className="py-3 px-2 text-sm text-text-secondary">{apt.time}</td>
+                                  <td className="py-3 px-2 text-right">
+                                    <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full uppercase
+                                      ${apt.status === 'completed' ? 'bg-success/10 text-success' :
+                                        apt.status === 'scheduled' ? 'bg-primary/10 text-primary' :
+                                          'bg-gray-100 text-text-secondary'}`}>
+                                      {apt.status}
+                                    </span>
+                                  </td>
+                                  <td className="py-3 px-2 text-right">
+                                    {isLoading ? (
+                                      <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                                    ) : isExpanded ? (
+                                      <ChevronUp className="w-4 h-4 text-text-secondary" />
+                                    ) : (
+                                      <ChevronDown className="w-4 h-4 text-text-secondary" />
+                                    )}
+                                  </td>
+                                </tr>
+                                {isExpanded && (
+                                  <tr key={`${aptId}-detail`}>
+                                    <td colSpan="4" className="p-4 bg-gray-50/50">
+                                      {isLoading ? (
+                                        <div className="flex justify-center py-4">
+                                          <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                                        </div>
+                                      ) : detail ? (
+                                        <div className="space-y-4">
+                                          {/* Session Description */}
+                                          <div>
+                                            <h5 className="text-sm font-semibold text-text-primary mb-2 flex items-center gap-1">
+                                              <FileText className="w-4 h-4 text-primary" /> Session Description
+                                            </h5>
+                                            {detail.sessionNote?.sessionDescription ? (
+                                              <p className="text-sm text-text-secondary bg-white p-3 rounded-xl">{detail.sessionNote.sessionDescription}</p>
+                                            ) : (
+                                              <p className="text-xs text-text-secondary italic">No description</p>
+                                            )}
+                                          </div>
+
+                                          {/* Report */}
+                                          <div>
+                                            <h5 className="text-sm font-semibold text-text-primary mb-2 flex items-center gap-1">
+                                              <FileText className="w-4 h-4 text-primary" /> Report
+                                            </h5>
+                                            {detail.sessionNote?.report ? (
+                                              <p className="text-sm text-text-secondary bg-green-50 p-3 rounded-xl border border-green-200">{detail.sessionNote.report}</p>
+                                            ) : (
+                                              <div className="space-y-2">
+                                                <textarea
+                                                  value={reportText}
+                                                  onChange={(e) => setReportText(e.target.value)}
+                                                  placeholder="Write a session report..."
+                                                  rows={3}
+                                                  className="input-field text-sm resize-none"
+                                                />
+                                                <button
+                                                  onClick={() => handleSaveReport(aptId, selectedPatient?._id)}
+                                                  disabled={savingReport}
+                                                  className="btn-primary text-sm flex items-center gap-1 !py-2"
+                                                >
+                                                  {savingReport ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                                                  Create Report
+                                                </button>
+                                              </div>
+                                            )}
+                                          </div>
+
+                                          {/* Questionnaire Responses */}
+                                          {detail.questionnaireResponses?.length > 0 && (
+                                            <div>
+                                              <h5 className="text-sm font-semibold text-text-primary mb-2 flex items-center gap-1">
+                                                <ClipboardList className="w-4 h-4 text-primary" /> Questionnaire Responses
+                                              </h5>
+                                              <div className="space-y-2">
+                                                {detail.questionnaireResponses.map((qr, qi) => (
+                                                  <div key={qi} className="bg-white p-3 rounded-xl border border-gray-100">
+                                                    <p className="text-xs font-medium text-primary mb-1">{qr.template?.title || 'Questionnaire'}</p>
+                                                    {(qr.responses || []).map((r, ri) => (
+                                                      <div key={ri} className="text-xs mt-1">
+                                                        <span className="text-text-secondary">{r.questionText}: </span>
+                                                        <span className="font-medium text-text-primary">{r.answer}</span>
+                                                      </div>
+                                                    ))}
+                                                    {qr.totalScore > 0 && <p className="text-xs font-bold text-primary mt-1">Score: {qr.totalScore}</p>}
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            </div>
+                                          )}
+                                        </div>
+                                      ) : (
+                                        <p className="text-sm text-text-secondary italic text-center py-4">No details available</p>
+                                      )}
+                                    </td>
+                                  </tr>
+                                )}
+                              </>
+                            );
+                          })}
                         </tbody>
                       </table>
                       {(!patientDetail?.appointments || patientDetail.appointments.length === 0) && (

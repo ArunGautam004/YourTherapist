@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard, Users, Calendar as CalendarIcon, BarChart3, MessageCircle, Settings,
-  ChevronLeft, ChevronRight, Video, MessageSquare, Clock, X, Save, Loader2
+  ChevronLeft, ChevronRight, Video, MessageSquare, Clock, X, Save, Loader2, ClipboardList
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Sidebar from '../../components/layout/Sidebar';
@@ -14,6 +14,7 @@ const adminLinks = [
   { name: 'Patients', path: '/admin/patients', icon: Users },
   { name: 'Calendar', path: '/admin/calendar', icon: CalendarIcon },
   { name: 'Analytics', path: '/admin/analytics', icon: BarChart3 },
+  { name: 'Questionnaires', path: '/admin/questionnaires', icon: ClipboardList },
   { name: 'Messages', path: '/admin/messages', icon: MessageCircle },
   { name: 'Settings', path: '/admin/settings', icon: Settings },
 ];
@@ -239,11 +240,10 @@ const AdminCalendar = () => {
                         return (
                           <td key={day.toISOString()} className="py-1 px-1">
                             {apt ? (
-                              <div className={`p-2 rounded-xl text-xs transition-all hover:shadow-soft cursor-pointer ${
-                                apt.status === 'completed' ? 'bg-success/10 border border-success/20' :
-                                apt.status === 'cancelled' ? 'bg-gray-100 border border-gray-200 opacity-50' :
-                                'bg-primary-light border border-primary/10'
-                              }`}>
+                              <div className={`p-2 rounded-xl text-xs transition-all hover:shadow-soft cursor-pointer ${apt.status === 'completed' ? 'bg-success/10 border border-success/20' :
+                                  apt.status === 'cancelled' ? 'bg-gray-100 border border-gray-200 opacity-50' :
+                                    'bg-primary-light border border-primary/10'
+                                }`}>
                                 <p className="font-semibold text-text-primary truncate">{apt.patient?.name || 'Patient'}</p>
                                 <div className="flex items-center gap-1 mt-1 text-text-secondary">
                                   {apt.type === 'video' ? <Video className="w-3 h-3" /> : <MessageSquare className="w-3 h-3" />}

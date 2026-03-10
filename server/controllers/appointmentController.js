@@ -174,14 +174,7 @@ export const verifyPayment = async (req, res, next) => {
       console.error('⚠️ Confirmation email failed:', emailErr.message);
     }
 
-    // Send welcome/confirmation message from doctor to patient
-    const Message = (await import('../models/Message.js')).default;
-    await Message.create({
-      sender: appointment.doctor._id,
-      receiver: appointment.patient._id,
-      text: `Hello ${appointment.patient.name}! Your appointment is confirmed for ${new Date(appointment.date).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })} at ${appointment.time}. You can join the session using this link: ${process.env.CLIENT_URL || ''}${appointment.meetingLink}. See you then! 😊`,
-    });
-
+    // Welcome user via email (without the link message in chat)
     res.json({ message: 'Payment verified and appointment confirmed!', appointment });
   } catch (error) {
     next(error);

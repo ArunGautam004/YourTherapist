@@ -11,19 +11,22 @@ import Contact from './pages/Contact';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import TermsOfService from './pages/TermsOfService';
 import ForgotPassword from './pages/ForgotPassword';
+import CompleteProfile from './pages/CompleteProfile';
 import PatientDashboard from './pages/patient/Dashboard';
 import BookAppointment from './pages/patient/BookAppointment';
 import PatientSessions from './pages/patient/Sessions';
 import MoodJournal from './pages/patient/MoodJournal';
 import PatientMessages from './pages/patient/Messages';
+import PatientSettings from './pages/patient/Settings';
 import AdminDashboard from './pages/admin/Dashboard';
 import AdminPatients from './pages/admin/Patients';
 import AdminCalendar from './pages/admin/Calendar';
 import AdminAnalytics from './pages/admin/Analytics';
+import AdminMessages from './pages/admin/Messages';
+import AdminSettings from './pages/admin/Settings';
+import AdminQuestionnaires from './pages/admin/Questionnaires';
 import VideoSession from './pages/VideoSession';
 import VerifyOTP from './pages/VerifyOTP';
-
-import AdminMessages from './pages/admin/Messages';
 
 function App() {
   return (
@@ -49,6 +52,9 @@ function App() {
           <Route path="/privacy" element={<PrivacyPolicy />} />
           <Route path="/terms" element={<TermsOfService />} />
 
+          {/* Complete Profile (post-registration) */}
+          <Route path="/complete-profile" element={<CompleteProfile />} />
+
           {/* Patient Routes */}
           <Route path="/patient/dashboard" element={
             <ProtectedRoute allowedRoles={['patient']}><PatientDashboard /></ProtectedRoute>
@@ -64,6 +70,9 @@ function App() {
           } />
           <Route path="/patient/messages" element={
             <ProtectedRoute allowedRoles={['patient']}><PatientMessages /></ProtectedRoute>
+          } />
+          <Route path="/patient/settings" element={
+            <ProtectedRoute allowedRoles={['patient']}><PatientSettings /></ProtectedRoute>
           } />
 
           {/* Admin/Doctor Routes */}
@@ -81,6 +90,12 @@ function App() {
           } />
           <Route path="/admin/messages" element={
             <ProtectedRoute allowedRoles={['doctor', 'admin']}><AdminMessages /></ProtectedRoute>
+          } />
+          <Route path="/admin/settings" element={
+            <ProtectedRoute allowedRoles={['doctor', 'admin']}><AdminSettings /></ProtectedRoute>
+          } />
+          <Route path="/admin/questionnaires" element={
+            <ProtectedRoute allowedRoles={['doctor', 'admin']}><AdminQuestionnaires /></ProtectedRoute>
           } />
 
           {/* Session — accessible by both roles */}

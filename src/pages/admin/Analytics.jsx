@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   LayoutDashboard, Users, Calendar, BarChart3, MessageCircle, Settings,
-  TrendingUp, AlertTriangle
+  TrendingUp, AlertTriangle, ClipboardList
 } from 'lucide-react';
 import Sidebar from '../../components/layout/Sidebar';
 import { patientAPI, messageAPI } from '../../services/api';
@@ -12,6 +12,7 @@ const adminLinks = [
   { name: 'Patients', path: '/admin/patients', icon: Users },
   { name: 'Calendar', path: '/admin/calendar', icon: Calendar },
   { name: 'Analytics', path: '/admin/analytics', icon: BarChart3 },
+  { name: 'Questionnaires', path: '/admin/questionnaires', icon: ClipboardList },
   { name: 'Messages', path: '/admin/messages', icon: MessageCircle, badge: '5' },
   { name: 'Settings', path: '/admin/settings', icon: Settings },
 ];
@@ -45,6 +46,7 @@ const AdminAnalytics = () => {
     { name: 'Patients', path: '/admin/patients', icon: Users },
     { name: 'Calendar', path: '/admin/calendar', icon: Calendar },
     { name: 'Analytics', path: '/admin/analytics', icon: BarChart3 },
+    { name: 'Questionnaires', path: '/admin/questionnaires', icon: ClipboardList },
     { name: 'Messages', path: '/admin/messages', icon: MessageCircle, badge: totalUnread > 0 ? totalUnread.toString() : null },
     { name: 'Settings', path: '/admin/settings', icon: Settings },
   ];

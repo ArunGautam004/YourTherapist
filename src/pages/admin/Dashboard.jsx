@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import {
   LayoutDashboard, Users, Calendar, BarChart3, MessageCircle, Settings,
-  Video, Clock, TrendingUp, AlertTriangle, ArrowRight, Bell
+  Video, Clock, TrendingUp, AlertTriangle, ArrowRight, Bell, ClipboardList
 } from 'lucide-react';
 import Sidebar from '../../components/layout/Sidebar';
 import { useAuth } from '../../context/AuthContext';
@@ -24,6 +24,7 @@ const adminLinks = [
   { name: 'Patients', path: '/admin/patients', icon: Users },
   { name: 'Calendar', path: '/admin/calendar', icon: Calendar },
   { name: 'Analytics', path: '/admin/analytics', icon: BarChart3 },
+  { name: 'Questionnaires', path: '/admin/questionnaires', icon: ClipboardList },
   { name: 'Messages', path: '/admin/messages', icon: MessageCircle, badge: '5' },
   { name: 'Settings', path: '/admin/settings', icon: Settings },
 ];
@@ -269,8 +270,12 @@ const AdminDashboard = () => {
                       })
                       .map((session) => (
                         <div key={session._id} className="flex items-center gap-3 p-3 rounded-2xl hover:bg-gray-50 transition-colors">
-                          <div className="w-10 h-10 rounded-xl bg-primary-light flex items-center justify-center text-xl flex-shrink-0">
-                            👤
+                          <div className="w-10 h-10 rounded-xl bg-primary-light flex items-center justify-center text-xl flex-shrink-0 overflow-hidden">
+                            {session.patient?.profilePic ? (
+                              <img src={session.patient.profilePic} alt={session.patient.name} className="w-full h-full object-cover" />
+                            ) : (
+                              '👤'
+                            )}
                           </div>
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-semibold text-text-primary truncate">{session.patient?.name}</p>

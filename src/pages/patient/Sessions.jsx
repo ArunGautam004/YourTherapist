@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import {
     LayoutDashboard, Calendar, BookOpen, MessageCircle, Settings,
-    Video, Clock, Filter
+    Video, Clock, X, FileText, ClipboardList, ChevronRight, Loader2
 } from 'lucide-react';
 import Sidebar from '../../components/layout/Sidebar';
 import { useAuth } from '../../context/AuthContext';
-import { appointmentAPI } from '../../services/api';
+import { appointmentAPI, sessionAPI } from '../../services/api';
 
 const fadeInUp = {
     hidden: { opacity: 0, y: 20 },
@@ -24,7 +24,7 @@ const patientLinks = [
     { name: 'My Sessions', path: '/patient/sessions', icon: Clock },
     { name: 'Book Appointment', path: '/patient/book', icon: Calendar },
     { name: 'Mood Journal', path: '/patient/journal', icon: BookOpen },
-    { name: 'Messages', path: '/patient/messages', icon: MessageCircle, badge: '3' },
+    { name: 'Messages', path: '/patient/messages', icon: MessageCircle },
     { name: 'Settings', path: '/patient/settings', icon: Settings },
 ];
 
@@ -32,7 +32,9 @@ const PatientSessions = () => {
     const { user } = useAuth();
     const [appointments, setAppointments] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [filter, setFilter] = useState('upcoming'); // 'upcoming', 'past', 'all'
+    const [selectedSession, setSelectedSession] = useState(null);
+    const [sessionDetail, setSessionDetail] = useState(null);
+    const [detailLoading, setDetailLoading] = useState(false);
 
     useEffect(() => {
         const fetchAppointments = async () => {
@@ -48,6 +50,20 @@ const PatientSessions = () => {
         };
         fetchAppointments();
     }, []);
+
+    const handleViewDetail = async (apt) => {
+        setSelectedSession(apt);
+        setDetailLoading(true);
+        try {
+            const { data } = await sessionAPI.getSessionDetail(apt._id);
+            setSessionDetail(data);
+        } catch (err) {
+            console.error('Failed to load session detail:', err);
+            setSessionDetail(null);
+        } finally {
+            setDetailLoading(false);
+        }
+    };
 
     const sortedAppointments = [...appointments].map(apt => {
         const safeDate = new Date(apt.date);
@@ -72,7 +88,6 @@ const PatientSessions = () => {
         const now = new Date();
         const diff = isValidDate ? (aptDate - now) / 60000 : Infinity;
 
-        // A session is ongoing if it's within 10 mins of starting OR it has started but hasn't ended yet
         const isOngoing = isValidDate && diff <= 10 && now < endTime && apt.status !== 'cancelled';
         const isPast = ['completed', 'cancelled', 'no-show'].includes(apt.status) || (isValidDate && now >= endTime);
 
@@ -91,7 +106,7 @@ const PatientSessions = () => {
 
         return { ...apt, aptDate, isValidDate, safeDate, diff, isOngoing, isPast, displayStatus };
     }).sort((a, b) => {
-        return (a.aptDate.getTime() || 0) - (b.aptDate.getTime() || 0); // global ascending sort
+        return (a.aptDate.getTime() || 0) - (b.aptDate.getTime() || 0);
     });
 
     const renderAppointment = (apt) => (
@@ -106,7 +121,7 @@ const PatientSessions = () => {
                 </div>
             </div>
 
-            <div className="flex items-center gap-6 flex-wrap sm:flex-nowrap mt-2 sm:mt-0">
+            <div className="flex items-center gap-4 flex-wrap sm:flex-nowrap mt-2 sm:mt-0">
                 <div className="bg-white px-4 py-2 rounded-xl border border-gray-100 flex items-center gap-2">
                     <Calendar className="w-4 h-4 text-primary" />
                     <div className="text-sm font-medium">
@@ -122,6 +137,13 @@ const PatientSessions = () => {
                     <Link to={apt.meetingLink} className="btn-primary whitespace-nowrap !px-6 flex items-center gap-2">
                         <Video className="w-4 h-4" /> Join Session
                     </Link>
+                ) : apt.isPast && apt.displayStatus !== 'Cancelled' ? (
+                    <button
+                        onClick={() => handleViewDetail(apt)}
+                        className="px-4 py-2 rounded-xl bg-primary-light text-primary text-sm font-medium hover:bg-primary/10 transition-colors flex items-center gap-1"
+                    >
+                        <FileText className="w-4 h-4" /> View Details
+                    </button>
                 ) : (
                     <div className="w-[140px] flex justify-end">
                         <span className={`text-sm font-medium px-4 py-2 rounded-xl text-center w-full ${apt.displayStatus === 'Cancelled' ? 'bg-danger/10 text-danger' :
@@ -215,6 +237,132 @@ const PatientSessions = () => {
                     </motion.div>
                 </motion.div>
             </main>
+
+            {/* Session Detail Modal */}
+            <AnimatePresence>
+                {selectedSession && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+                        onClick={() => { setSelectedSession(null); setSessionDetail(null); }}
+                    >
+                        <motion.div
+                            initial={{ scale: 0.95, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            exit={{ scale: 0.95, opacity: 0 }}
+                            className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-xl"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            {/* Modal Header */}
+                            <div className="flex items-center justify-between p-5 border-b border-gray-100 sticky top-0 bg-white rounded-t-2xl z-10">
+                                <div>
+                                    <h3 className="font-display font-bold text-lg text-text-primary">Session Details</h3>
+                                    <p className="text-sm text-text-secondary">
+                                        {selectedSession.isValidDate
+                                            ? selectedSession.safeDate.toLocaleDateString('en', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+                                            : 'Unknown Date'
+                                        } • {selectedSession.time}
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={() => { setSelectedSession(null); setSessionDetail(null); }}
+                                    className="p-2 rounded-xl hover:bg-gray-100 text-text-secondary transition-colors"
+                                >
+                                    <X className="w-5 h-5" />
+                                </button>
+                            </div>
+
+                            <div className="p-5 space-y-5">
+                                {detailLoading ? (
+                                    <div className="flex items-center justify-center py-12">
+                                        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                                    </div>
+                                ) : (
+                                    <>
+                                        {/* Doctor Info */}
+                                        <div className="flex items-center gap-3 p-4 rounded-xl bg-gray-50">
+                                            <div className="w-12 h-12 rounded-xl bg-primary-light flex items-center justify-center text-2xl">👨‍⚕️</div>
+                                            <div>
+                                                <p className="font-semibold text-text-primary">{selectedSession.doctor?.name || 'Doctor'}</p>
+                                                <p className="text-sm text-text-secondary">{selectedSession.doctor?.specialization || 'Therapist'}</p>
+                                            </div>
+                                        </div>
+
+                                        {/* Session Description */}
+                                        <div>
+                                            <h4 className="font-semibold text-text-primary mb-3 flex items-center gap-2">
+                                                <FileText className="w-4 h-4 text-primary" />
+                                                Session Description
+                                            </h4>
+                                            {sessionDetail?.sessionNote?.sessionDescription ? (
+                                                <div className="p-4 rounded-xl bg-primary-light/50 border border-primary/10">
+                                                    <p className="text-sm text-text-primary leading-relaxed">{sessionDetail.sessionNote.sessionDescription}</p>
+                                                </div>
+                                            ) : (
+                                                <p className="text-sm text-text-secondary italic">No session description available</p>
+                                            )}
+                                        </div>
+
+                                        {/* Doctor's Report */}
+                                        <div>
+                                            <h4 className="font-semibold text-text-primary mb-3 flex items-center gap-2">
+                                                <FileText className="w-4 h-4 text-primary" />
+                                                Doctor's Report
+                                            </h4>
+                                            {sessionDetail?.sessionNote?.report ? (
+                                                <div className="p-4 rounded-xl bg-green-50 border border-green-200">
+                                                    <p className="text-sm text-text-primary leading-relaxed">{sessionDetail.sessionNote.report}</p>
+                                                </div>
+                                            ) : (
+                                                <p className="text-sm text-text-secondary italic">No report generated yet</p>
+                                            )}
+                                        </div>
+
+                                        {/* Questionnaire Responses */}
+                                        <div>
+                                            <h4 className="font-semibold text-text-primary mb-3 flex items-center gap-2">
+                                                <ClipboardList className="w-4 h-4 text-primary" />
+                                                Questionnaire Responses
+                                            </h4>
+                                            {sessionDetail?.questionnaireResponses?.length > 0 ? (
+                                                <div className="space-y-3">
+                                                    {sessionDetail.questionnaireResponses.map((qr, i) => (
+                                                        <div key={i} className="p-4 rounded-xl border border-gray-100">
+                                                            <div className="flex items-center justify-between mb-3">
+                                                                <div>
+                                                                    <p className="font-medium text-text-primary text-sm">{qr.template?.title || 'Questionnaire'}</p>
+                                                                    {qr.template?.diseaseName && (
+                                                                        <span className="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary">{qr.template.diseaseName}</span>
+                                                                    )}
+                                                                </div>
+                                                                {qr.totalScore > 0 && (
+                                                                    <span className="text-sm font-bold text-primary">Score: {qr.totalScore}</span>
+                                                                )}
+                                                            </div>
+                                                            <div className="space-y-2">
+                                                                {(qr.responses || []).map((r, ri) => (
+                                                                    <div key={ri} className="text-sm bg-gray-50 p-2 rounded-lg">
+                                                                        <p className="text-text-secondary text-xs mb-0.5">{r.questionText}</p>
+                                                                        <p className="font-medium text-text-primary">{r.answer}</p>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <p className="text-sm text-text-secondary italic">No questionnaires were submitted for this session</p>
+                                            )}
+                                        </div>
+                                    </>
+                                )}
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </div>
     );
 };

@@ -92,3 +92,20 @@ export const sendMessage = async (req, res, next) => {
     next(error);
   }
 };
+
+// @desc    Mark messages as read
+// @route   PUT /api/messages/read/:senderId
+export const markAsRead = async (req, res, next) => {
+  try {
+    const { senderId } = req.params;
+
+    await Message.updateMany(
+      { sender: senderId, receiver: req.user._id, read: false },
+      { read: true }
+    );
+
+    res.json({ success: true });
+  } catch (error) {
+    next(error);
+  }
+};

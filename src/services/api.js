@@ -81,6 +81,7 @@ export const messageAPI = {
   getConversations: () => api.get('/messages/conversations'),
   getMessages: (userId, params) => api.get(`/messages/${userId}`, { params }),
   send: (data) => api.post('/messages', data),
+  markAsRead: (senderId) => api.put(`/messages/read/${senderId}`),
 };
 
 // ===== SESSIONS =====
@@ -92,6 +93,17 @@ export const sessionAPI = {
   createTemplate: (data) => api.post('/sessions/questionnaires', data),
   submitResponse: (data) => api.post('/sessions/questionnaires/respond', data),
   getResponses: (appointmentId) => api.get(`/sessions/questionnaires/responses/${appointmentId}`),
+  getByDisease: (diseaseName) => api.get(`/sessions/questionnaires/by-disease/${encodeURIComponent(diseaseName)}`),
+  getDiseases: () => api.get('/sessions/questionnaires/diseases'),
+  getSessionDetail: (appointmentId) => api.get(`/sessions/detail/${appointmentId}`),
+};
+
+// ===== UPLOAD =====
+// ✅ Added missing uploadAPI — was causing blank page crash
+export const uploadAPI = {
+  uploadImage: (formData) => api.post('/upload/image', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }),
 };
 
 export default api;

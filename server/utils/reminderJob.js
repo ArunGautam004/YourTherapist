@@ -11,13 +11,21 @@ export const startReminderJob = () => {
   setInterval(async () => {
     try {
       const now = new Date();
+      const fifteenMinLater = new Date(now.getTime() + 15 * 60 * 1000);
       const fiveMinLater = new Date(now.getTime() + 5 * 60 * 1000);
 
-      // Find appointments within the next 5 minutes that haven't been reminded
+      // We'll track two states: reminderEmailSent and linkMessageSent. 
+      // Since schema might not have linkMessageSent yet, we'll just use reminderSent for the sequence
+      // Or we can just use time-based constraints and assume it runs exactly once within that minute window
+      // The job runs every minute, so we'll check precise minute boundaries.
+
       const appointments = await Appointment.find({
         status: { $in: ['scheduled', 'upcoming'] },
         paymentStatus: 'paid',
-        reminderSent: false,
+        $or: [
+          { reminderSent: false },
+          { reminderSent: true } // Need to fetch them anyway to check for 5-min link if we don't have a specific flag in DB
+        ]
       })
         .populate('patient', 'name email')
         .populate('doctor', 'name');
@@ -31,8 +39,10 @@ export const startReminderJob = () => {
         if (period === 'AM' && h === 12) h = 0;
         aptDate.setHours(h, m || 0, 0, 0);
 
-        // Check if appointment is within the next 5 minutes
-        if (aptDate >= now && aptDate <= fiveMinLater) {
+        const diffMinutes = Math.round((aptDate - now) / 60000);
+
+        // --- 15 Minute Email Reminder ---
+        if (diffMinutes === 15 && !apt.reminderSent) {
           try {
             await sendEmail({
               to: apt.patient.email,
@@ -45,30 +55,47 @@ export const startReminderJob = () => {
                   <div style="background:white;border-radius:12px;padding:24px;text-align:center;">
                     <p style="font-size:48px;margin:0;">⏰</p>
                     <h2 style="color:#333;margin:12px 0 8px;">Session Starting Soon!</h2>
-                    <p style="color:#666;font-size:14px;">Hello <strong>${apt.patient.name}</strong>, your session with <strong>${apt.doctor.name.startsWith('Dr.') ? apt.doctor.name : `Dr. ${apt.doctor.name}`}</strong> starts in 5 minutes.</p>
-                    <div style="margin:20px 0;">
-                      <a href="${process.env.CLIENT_URL}/patient/session/${apt.meetingLink.split('/').pop()}" style="display:inline-block;background:#0d6b5e;color:white;padding:14px 28px;border-radius:12px;text-decoration:none;font-weight:bold;font-size:14px;">
-                        Join Session →
-                      </a>
-                    </div>
+                    <p style="color:#666;font-size:14px;">Hello <strong>${apt.patient.name}</strong>, your session with <strong>${apt.doctor.name.startsWith('Dr.') ? apt.doctor.name : `Dr. ${apt.doctor.name}`}</strong> starts in 15 minutes.</p>
+                    <p style="color:#666;font-size:14px;">You will receive the meeting link in your chat 5 minutes before the session starts.</p>
                     <p style="color:#999;font-size:12px;">Make sure your camera and microphone are working.</p>
                   </div>
                 </div>
               `,
             });
-            // Also send an internal chat message as a reminder
-            const Message = (await import('../models/Message.js')).default;
-            await Message.create({
-              sender: apt.doctor._id,
-              receiver: apt.patient._id,
-              text: `🔔 Reminder: Our session is starting in 5 minutes! You can join here: ${process.env.CLIENT_URL || ''}${apt.meetingLink}`,
-            });
-
             apt.reminderSent = true;
             await apt.save();
-            console.log(`⏰ Reminder sent to ${apt.patient.email} and internal chat for appointment at ${apt.time}`);
+            console.log(`⏰ Email reminder sent to ${apt.patient.email} for appointment at ${apt.time}`);
           } catch (emailErr) {
             console.error(`⚠️ Reminder email failed for ${apt.patient.email}:`, emailErr.message);
+          }
+        }
+
+        // --- 5 Minute Message Link ---
+        // Using a temporary hack: Since we only have 'reminderSent' in schema, 
+        // we'll just check if it's exactly 5 minutes out AND reminderSent is true
+        // (to ensure we don't spam if server restarts). For safety, we also check if 
+        // a message exists in the DB with the meeting link to avoid duplicates.
+        if (diffMinutes === 5) {
+          try {
+            const Message = (await import('../models/Message.js')).default;
+
+            // Check if we already sent the link
+            const existingLinkMsg = await Message.findOne({
+              sender: apt.doctor._id,
+              receiver: apt.patient._id,
+              text: { $regex: apt.meetingLink }
+            });
+
+            if (!existingLinkMsg) {
+              await Message.create({
+                sender: apt.doctor._id,
+                receiver: apt.patient._id,
+                text: `🔗 Here is the link for our session starting in 5 minutes! Click to join: ${process.env.CLIENT_URL || ''}${apt.meetingLink}`,
+              });
+              console.log(`🔗 Meeting link sent to ${apt.patient.email} via chat for appointment at ${apt.time}`);
+            }
+          } catch (linkErr) {
+            console.error(`⚠️ Link message failed for ${apt.patient.email}:`, linkErr.message);
           }
         }
       }

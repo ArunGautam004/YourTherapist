@@ -4,12 +4,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Mic, MicOff, Video as VideoIcon, VideoOff, PhoneOff, Monitor,
   MessageSquare, ClipboardList, Maximize, Minimize,
-  Send, X, ChevronRight, CheckCircle2, Clock, Brain, Loader2, User, Stethoscope
+  Send, X, ChevronRight, CheckCircle2, Clock, Brain, Loader2, User, Stethoscope,
+  FileText, ChevronDown
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
 import { getSocket } from '../services/socket';
-import { appointmentAPI } from '../services/api';
+import { appointmentAPI, sessionAPI } from '../services/api';
 
 const servers = {
   iceServers: [
@@ -18,16 +19,8 @@ const servers = {
   ]
 };
 
-const defaultQuestions = [
-  { id: 1, text: 'How would you rate your overall mood this past week?', type: 'scale', options: ['1','2','3','4','5','6','7','8','9','10'] },
-  { id: 2, text: 'How often have you felt nervous or anxious?', type: 'choice', options: ['Not at all', 'Several days', 'More than half the days', 'Nearly every day'] },
-  { id: 3, text: 'How would you describe your sleep quality?', type: 'choice', options: ['Very poor', 'Poor', 'Fair', 'Good', 'Excellent'] },
-  { id: 4, text: 'Have you been able to practice the coping techniques we discussed?', type: 'choice', options: ['Yes, regularly', 'Sometimes', 'Rarely', 'Not at all'] },
-  { id: 5, text: 'Is there anything specific you would like to discuss today?', type: 'text' },
-];
-
 // Avatar shown when camera is off or while connecting
-const ParticipantAvatar = ({ name, role, size = 'large' }) => {
+const ParticipantAvatar = ({ name, role, profilePic, size = 'large' }) => {
   const isDoctor = role === 'doctor' || role === 'admin';
   const initials = name
     ? name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
@@ -36,8 +29,12 @@ const ParticipantAvatar = ({ name, role, size = 'large' }) => {
   const large = size === 'large';
   return (
     <div className={`flex flex-col items-center gap-3`}>
-      <div className={`${large ? 'w-28 h-28' : 'w-12 h-12'} rounded-full bg-gradient-to-br from-primary/80 to-secondary/80 flex items-center justify-center shadow-lg border-2 border-white/20`}>
-        <span className={`${large ? 'text-4xl' : 'text-lg'} font-bold text-white font-display`}>{initials}</span>
+      <div className={`${large ? 'w-28 h-28' : 'w-12 h-12'} rounded-full bg-gradient-to-br from-primary/80 to-secondary/80 flex items-center justify-center shadow-lg border-2 border-white/20 overflow-hidden`}>
+        {profilePic ? (
+          <img src={profilePic} alt={name || 'Participant'} className="w-full h-full object-cover" />
+        ) : (
+          <span className={`${large ? 'text-4xl' : 'text-lg'} font-bold text-white font-display`}>{initials}</span>
+        )}
       </div>
       {name && <span className={`text-white font-medium ${large ? 'text-lg' : 'text-xs'} bg-black/30 px-3 py-1 rounded-full`}>{isDoctor && !name.toLowerCase().startsWith('dr') ? `Dr. ${name}` : name}</span>}
       {!name && <span className={`text-gray-300 ${large ? 'text-base' : 'text-xs'}`}>{isDoctor ? 'Doctor' : 'Patient'}</span>}
@@ -52,14 +49,15 @@ const VideoSession = () => {
 
   const [isInWaitingRoom, setIsInWaitingRoom] = useState(true);
   const [sessionActive, setSessionActive] = useState(false);
-  const [remoteParticipant, setRemoteParticipant] = useState(null); // { name, role }
+  const [remoteParticipant, setRemoteParticipant] = useState(null);
   const [isRemoteVideoActive, setIsRemoteVideoActive] = useState(false);
-  const [isRemoteConnected, setIsRemoteConnected] = useState(false); // socket-level connection
+  const [isRemoteConnected, setIsRemoteConnected] = useState(false);
   const [micOn, setMicOn] = useState(true);
   const [videoOn, setVideoOn] = useState(true);
   const [showChat, setShowChat] = useState(false);
   const [showQuestionnaire, setShowQuestionnaire] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [showEndDialog, setShowEndDialog] = useState(false);
 
   const showChatRef = useRef(false);
   useEffect(() => {
@@ -71,10 +69,22 @@ const VideoSession = () => {
   const [chatMessages, setChatMessages] = useState([]);
   const chatBottomRef = useRef(null);
 
-  const [questions, setQuestions] = useState(defaultQuestions);
+  // Questionnaire states
+  const [diseases, setDiseases] = useState([]);
+  const [selectedDisease, setSelectedDisease] = useState('');
+  const [diseaseTemplates, setDiseaseTemplates] = useState([]);
+  const [selectedTemplate, setSelectedTemplate] = useState(null);
+  const [loadingTemplates, setLoadingTemplates] = useState(false);
+
+  // Patient-side questionnaire
+  const [questions, setQuestions] = useState([]);
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [answers, setAnswers] = useState({});
   const [questionnaireSubmitted, setQuestionnaireSubmitted] = useState(false);
+
+  // Session description (doctor)
+  const [sessionDescription, setSessionDescription] = useState('');
+  const [savingDescription, setSavingDescription] = useState(false);
 
   const [appointment, setAppointment] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -87,7 +97,7 @@ const VideoSession = () => {
   const pendingCandidates = useRef([]);
   const isOfferSent = useRef(false);
 
-  // Scroll chat to bottom on new messages
+  // Scroll chat to bottom
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
@@ -112,7 +122,32 @@ const VideoSession = () => {
     fetchAppointment();
   }, [roomId]);
 
-  // Set up local media (waiting room preview + session)
+  // Fetch disease list for doctor
+  useEffect(() => {
+    const isDoc = user?.role === 'doctor' || user?.role === 'admin';
+    if (isDoc) {
+      sessionAPI.getDiseases().then(({ data }) => {
+        setDiseases(data.diseases || []);
+      }).catch(() => { });
+    }
+  }, [user]);
+
+  // Fetch templates when disease selected
+  useEffect(() => {
+    if (!selectedDisease) {
+      setDiseaseTemplates([]);
+      setSelectedTemplate(null);
+      return;
+    }
+    setLoadingTemplates(true);
+    sessionAPI.getByDisease(selectedDisease).then(({ data }) => {
+      setDiseaseTemplates(data.templates || []);
+    }).catch(() => {
+      setDiseaseTemplates([]);
+    }).finally(() => setLoadingTemplates(false));
+  }, [selectedDisease]);
+
+  // Local media
   useEffect(() => {
     const setupMedia = async () => {
       try {
@@ -142,7 +177,7 @@ const VideoSession = () => {
     }
   }, [micOn, videoOn]);
 
-  // Keep local video attached after re-renders
+  // Keep local video attached
   useEffect(() => {
     if (localStream.current && localVideoRef.current && !localVideoRef.current.srcObject) {
       localVideoRef.current.srcObject = localStream.current;
@@ -159,28 +194,23 @@ const VideoSession = () => {
       return;
     }
 
-    // Create peer connection
     const pc = new RTCPeerConnection(servers);
     peerConnection.current = pc;
     isOfferSent.current = false;
 
-    // Add local tracks
     if (localStream.current) {
       localStream.current.getTracks().forEach(track => {
         pc.addTrack(track, localStream.current);
       });
     }
 
-    // Receive remote tracks
     pc.ontrack = (event) => {
-      console.log('[WebRTC] Got remote track', event.streams);
       if (remoteVideoRef.current && event.streams[0]) {
         remoteVideoRef.current.srcObject = event.streams[0];
         setIsRemoteVideoActive(true);
       }
     };
 
-    // ICE candidates
     pc.onicecandidate = (event) => {
       if (event.candidate) {
         socket.emit('call:ice-candidate', { roomId, candidate: event.candidate });
@@ -188,7 +218,6 @@ const VideoSession = () => {
     };
 
     pc.onconnectionstatechange = () => {
-      console.log('[WebRTC] Connection state:', pc.connectionState);
       if (pc.connectionState === 'connected') {
         setIsRemoteVideoActive(true);
       } else if (['disconnected', 'failed', 'closed'].includes(pc.connectionState)) {
@@ -196,12 +225,7 @@ const VideoSession = () => {
       }
     };
 
-    // ── Socket Handlers ──
-
-    // Both users joined → doctor creates offer
     const handleCallReady = async ({ participants }) => {
-      console.log('[Socket] call:ready', participants);
-      // Update remote participant info if provided
       if (participants) {
         const remote = participants.find(p => p.userId !== user?._id && p.userId !== user?.id);
         if (remote) setRemoteParticipant({ name: remote.name, role: remote.role });
@@ -222,7 +246,6 @@ const VideoSession = () => {
     };
 
     const handleUserJoined = ({ participant }) => {
-      console.log('[Socket] call:user-joined', participant);
       if (participant && participant.userId !== (user?._id || user?.id)) {
         setRemoteParticipant({ name: participant.name, role: participant.role });
         setIsRemoteConnected(true);
@@ -231,10 +254,8 @@ const VideoSession = () => {
     };
 
     const handleCallOffer = async ({ offer }) => {
-      console.log('[Socket] call:offer received');
       try {
         await pc.setRemoteDescription(new RTCSessionDescription(offer));
-        // Flush pending ICE candidates
         for (const c of pendingCandidates.current) {
           await pc.addIceCandidate(new RTCIceCandidate(c)).catch(console.warn);
         }
@@ -248,7 +269,6 @@ const VideoSession = () => {
     };
 
     const handleCallAnswer = async ({ answer }) => {
-      console.log('[Socket] call:answer received');
       try {
         await pc.setRemoteDescription(new RTCSessionDescription(answer));
         for (const c of pendingCandidates.current) {
@@ -281,14 +301,9 @@ const VideoSession = () => {
       if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
     };
 
-    // ── Chat ──
-    // FIX: server must broadcast room:message back to all clients in the room
-    // The sender adds message locally; receiver gets it via this event.
     const handleRoomMessage = (msg) => {
-      // Only add if the message was sent by someone else
       const myId = user?._id || user?.id;
-      if (msg.senderId && msg.senderId === myId) return; // already added locally
-
+      if (msg.senderId && msg.senderId === myId) return;
       setChatMessages(prev => [...prev, { ...msg, isOwn: false }]);
       if (!showChatRef.current) {
         setUnreadCount(prev => prev + 1);
@@ -296,21 +311,21 @@ const VideoSession = () => {
       }
     };
 
-    const handleQuestionnaireReceive = (q) => {
+    const handleQuestionnaireReceive = (data) => {
+      const q = data.questions || data;
       setQuestions(q);
       setAnswers({});
       setCurrentQuestion(0);
       setQuestionnaireSubmitted(false);
       setShowQuestionnaire(true);
       setShowChat(false);
-      toast('Received a check-in survey', { icon: '📋' });
+      toast('Received a questionnaire from doctor', { icon: '📋' });
     };
 
     const handleQuestionnaireResponse = () => {
       toast.success('Patient submitted the questionnaire!');
     };
 
-    // Register listeners
     socket.on('call:ready', handleCallReady);
     socket.on('call:user-joined', handleUserJoined);
     socket.on('call:offer', handleCallOffer);
@@ -321,7 +336,6 @@ const VideoSession = () => {
     socket.on('questionnaire:receive', handleQuestionnaireReceive);
     socket.on('questionnaire:response', handleQuestionnaireResponse);
 
-    // Join room — send user info so the other side can show name/role
     const userName = user?.name || user?.fullName || (user?.role === 'doctor' ? 'Doctor' : 'Patient');
     socket.emit('call:join-room', {
       roomId,
@@ -352,11 +366,34 @@ const VideoSession = () => {
     setSessionActive(true);
   };
 
-  const handleEndCall = () => {
+  const handleEndCall = async () => {
+    const isDoc = user?.role === 'doctor' || user?.role === 'admin';
+    if (isDoc && !showEndDialog) {
+      setShowEndDialog(true);
+      return;
+    }
+
+    // If doctor, save session description
+    if (isDoc && sessionDescription.trim() && appointment?._id) {
+      setSavingDescription(true);
+      try {
+        await sessionAPI.createNote({
+          appointment: appointment._id,
+          patient: appointment.patient?._id || appointment.patient,
+          sessionDescription: sessionDescription.trim(),
+          isSharedWithPatient: true,
+        });
+        toast.success('Session description saved!');
+      } catch (err) {
+        console.error('Failed to save session description:', err);
+      }
+      setSavingDescription(false);
+    }
+
     const socket = getSocket();
     if (socket) socket.emit('call:end', { roomId });
     localStream.current?.getTracks().forEach(t => t.stop());
-    navigate(user?.role === 'doctor' || user?.role === 'admin' ? '/admin/dashboard' : '/patient/dashboard');
+    navigate(isDoc ? '/admin/dashboard' : '/patient/dashboard');
   };
 
   const handleSendMessage = (e) => {
@@ -375,7 +412,6 @@ const VideoSession = () => {
       isOwn: true,
     };
 
-    // Add locally immediately (optimistic)
     setChatMessages(prev => [...prev, msg]);
     setChatMessage('');
 
@@ -384,10 +420,22 @@ const VideoSession = () => {
   };
 
   const handleSendQuestionnaire = () => {
+    if (!selectedTemplate) {
+      toast.error('Please select a questionnaire first');
+      return;
+    }
     const socket = getSocket();
     if (socket) {
-      socket.emit('questionnaire:push', { roomId, questionnaire: defaultQuestions });
-      toast.success('Questionnaire sent to patient');
+      socket.emit('questionnaire:push', {
+        roomId,
+        questionnaire: {
+          templateId: selectedTemplate._id,
+          questions: selectedTemplate.questions,
+          title: selectedTemplate.title,
+          diseaseName: selectedTemplate.diseaseName,
+        },
+      });
+      toast.success(`Sent "${selectedTemplate.title}" to patient`);
     }
   };
 
@@ -424,33 +472,21 @@ const VideoSession = () => {
           animate={{ opacity: 1, scale: 1 }}
           className="max-w-lg w-full text-center"
         >
-          {/* Self video preview */}
           <div className="relative rounded-3xl overflow-hidden bg-gray-700 aspect-video mb-8 shadow-soft-xl">
-            <video
-              ref={localVideoRef}
-              autoPlay playsInline muted
-              className="absolute inset-0 w-full h-full object-cover transform scale-x-[-1]"
-            />
+            <video ref={localVideoRef} autoPlay playsInline muted className="absolute inset-0 w-full h-full object-cover transform scale-x-[-1]" />
             {!videoOn && (
               <div className="absolute inset-0 flex items-center justify-center bg-gray-800">
                 <ParticipantAvatar name={myName} role={user?.role} size="large" />
               </div>
             )}
             <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-3">
-              <button
-                onClick={() => setMicOn(!micOn)}
-                className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all ${micOn ? 'bg-white/10 text-white hover:bg-white/20' : 'bg-danger text-white'}`}
-              >
+              <button onClick={() => setMicOn(!micOn)} className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all ${micOn ? 'bg-white/10 text-white hover:bg-white/20' : 'bg-danger text-white'}`}>
                 {micOn ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
               </button>
-              <button
-                onClick={() => setVideoOn(!videoOn)}
-                className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all ${videoOn ? 'bg-white/10 text-white hover:bg-white/20' : 'bg-danger text-white'}`}
-              >
+              <button onClick={() => setVideoOn(!videoOn)} className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all ${videoOn ? 'bg-white/10 text-white hover:bg-white/20' : 'bg-danger text-white'}`}>
                 {videoOn ? <VideoIcon className="w-5 h-5" /> : <VideoOff className="w-5 h-5" />}
               </button>
             </div>
-            {/* Name tag */}
             <div className="absolute top-3 left-3 bg-black/50 text-white text-xs px-2 py-1 rounded-lg">
               {myName} (You)
             </div>
@@ -498,18 +534,15 @@ const VideoSession = () => {
             className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-500 ${isRemoteVideoActive ? 'opacity-100' : 'opacity-0'}`}
           />
 
-          {/* Placeholder when remote video isn't active */}
           {!isRemoteVideoActive && (
             <div className="absolute inset-0 bg-gradient-to-br from-gray-800 to-gray-900 flex items-center justify-center">
               <div className="text-center space-y-4">
                 {isRemoteConnected ? (
-                  // Other person connected but video not streaming yet
                   <>
                     <ParticipantAvatar name={otherName} role={otherRole} size="large" />
                     <p className="text-gray-400 text-sm animate-pulse">Connecting video…</p>
                   </>
                 ) : (
-                  // No one connected yet
                   <>
                     <div className="w-28 h-28 rounded-full bg-gray-700 border-2 border-dashed border-gray-500 flex items-center justify-center mx-auto">
                       {otherRole === 'doctor' ? (
@@ -531,7 +564,6 @@ const VideoSession = () => {
             </div>
           )}
 
-          {/* Remote participant name tag */}
           {isRemoteConnected && (
             <div className="absolute bottom-4 left-4 bg-black/50 backdrop-blur-sm text-white text-sm px-3 py-1.5 rounded-xl flex items-center gap-2 z-10">
               <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
@@ -551,18 +583,16 @@ const VideoSession = () => {
                 <ParticipantAvatar name={myName} role={user?.role} size="small" />
               </div>
             )}
-            <div className="absolute bottom-2 left-2 bg-black/50 text-white text-xs px-2 py-1 rounded-lg">
-              You
-            </div>
+            <div className="absolute bottom-2 left-2 bg-black/50 text-white text-xs px-2 py-1 rounded-lg">You</div>
           </div>
 
-          {/* Top-left: Live indicator */}
+          {/* Live indicator */}
           <div className="absolute top-4 left-4 bg-black/40 backdrop-blur-sm text-white px-4 py-2 rounded-xl flex items-center gap-2 text-sm z-10">
             <div className="w-2 h-2 bg-danger rounded-full animate-pulse" />
             <span className="font-medium">Live</span>
           </div>
 
-          {/* Top-right: Encrypted badge */}
+          {/* Encrypted badge */}
           <div className="absolute top-4 right-4 bg-black/40 backdrop-blur-sm text-white px-4 py-2 rounded-xl text-sm font-medium z-10">
             🔒 Encrypted
           </div>
@@ -649,11 +679,76 @@ const VideoSession = () => {
               {showQuestionnaire && (
                 <div className="flex-1 overflow-y-auto p-4">
                   {isDoctor ? (
-                    <div className="text-center mt-10 space-y-4">
-                      <ClipboardList className="w-12 h-12 text-primary mx-auto opacity-80" />
-                      <h4 className="text-white font-medium text-lg">Send Check-in Survey</h4>
-                      <p className="text-gray-400 text-sm mb-6">Send the standard mood and anxiety questionnaire to the patient.</p>
-                      <button onClick={handleSendQuestionnaire} className="btn-primary w-full">Send to Patient</button>
+                    /* Doctor - Select & Send Questionnaire */
+                    <div className="space-y-4">
+                      <div>
+                        <label className="text-xs font-medium text-gray-400 mb-1.5 block">Select Disease / Condition</label>
+                        <select
+                          value={selectedDisease}
+                          onChange={(e) => setSelectedDisease(e.target.value)}
+                          className="w-full bg-gray-700 text-white px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                        >
+                          <option value="">-- Choose Disease --</option>
+                          {diseases.map((d, i) => (
+                            <option key={i} value={d}>{d}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {selectedDisease && (
+                        <div>
+                          <label className="text-xs font-medium text-gray-400 mb-1.5 block">Select Questionnaire</label>
+                          {loadingTemplates ? (
+                            <div className="flex justify-center py-4">
+                              <Loader2 className="w-5 h-5 animate-spin text-primary" />
+                            </div>
+                          ) : diseaseTemplates.length > 0 ? (
+                            <div className="space-y-2">
+                              {diseaseTemplates.map((tmpl) => (
+                                <button
+                                  key={tmpl._id}
+                                  onClick={() => setSelectedTemplate(tmpl)}
+                                  className={`w-full p-3 rounded-xl text-left transition-all text-sm ${selectedTemplate?._id === tmpl._id
+                                    ? 'bg-primary text-white'
+                                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                                    }`}
+                                >
+                                  <p className="font-medium">{tmpl.title}</p>
+                                  <p className="text-xs mt-0.5 opacity-70">
+                                    {tmpl.testName && `${tmpl.testName} • `}{tmpl.questions?.length || 0} questions • {tmpl.answerType}
+                                  </p>
+                                </button>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-sm text-gray-500 text-center py-4">No questionnaires found for "{selectedDisease}"</p>
+                          )}
+                        </div>
+                      )}
+
+                      {selectedTemplate && (
+                        <div className="border-t border-gray-700 pt-4">
+                          <h4 className="text-white font-medium text-sm mb-2">Preview: {selectedTemplate.title}</h4>
+                          <div className="space-y-2 max-h-40 overflow-y-auto mb-4">
+                            {selectedTemplate.questions?.map((q, i) => (
+                              <p key={i} className="text-xs text-gray-400">
+                                <span className="text-primary font-bold">{i + 1}.</span> {q.text} <span className="text-gray-600">({q.type})</span>
+                              </p>
+                            ))}
+                          </div>
+                          <button onClick={handleSendQuestionnaire} className="btn-primary w-full text-sm">
+                            Send to Patient
+                          </button>
+                        </div>
+                      )}
+
+                      {diseases.length === 0 && !selectedDisease && (
+                        <div className="text-center mt-6 space-y-3">
+                          <ClipboardList className="w-10 h-10 text-gray-600 mx-auto" />
+                          <p className="text-gray-400 text-sm">No questionnaires created yet.</p>
+                          <p className="text-gray-500 text-xs">Go to Questionnaires page to create disease-specific questionnaires.</p>
+                        </div>
+                      )}
                     </div>
                   ) : questionnaireSubmitted ? (
                     <motion.div
@@ -667,7 +762,7 @@ const VideoSession = () => {
                       <h4 className="text-white font-bold text-lg mb-2">Submitted!</h4>
                       <p className="text-gray-400 text-sm">Your responses have been recorded.</p>
                     </motion.div>
-                  ) : (
+                  ) : questions.length > 0 ? (
                     <>
                       <div className="mb-6">
                         <div className="flex items-center justify-between mb-2">
@@ -693,11 +788,11 @@ const VideoSession = () => {
 
                           {questions[currentQuestion].type === 'scale' && (
                             <div className="flex flex-wrap gap-2">
-                              {questions[currentQuestion].options.map((opt) => (
+                              {(questions[currentQuestion].options || ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10']).map((opt) => (
                                 <button
                                   key={opt}
-                                  onClick={() => setAnswers({ ...answers, [questions[currentQuestion].id]: opt })}
-                                  className={`w-10 h-10 rounded-xl text-sm font-bold transition-all ${answers[questions[currentQuestion].id] === opt ? 'bg-primary text-white shadow-glow' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+                                  onClick={() => setAnswers({ ...answers, [questions[currentQuestion]._id || currentQuestion]: opt })}
+                                  className={`w-10 h-10 rounded-xl text-sm font-bold transition-all ${answers[questions[currentQuestion]._id || currentQuestion] === opt ? 'bg-primary text-white shadow-glow' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
                                 >
                                   {opt}
                                 </button>
@@ -705,13 +800,13 @@ const VideoSession = () => {
                             </div>
                           )}
 
-                          {questions[currentQuestion].type === 'choice' && (
+                          {(questions[currentQuestion].type === 'choice' || questions[currentQuestion].type === 'objective') && (
                             <div className="space-y-2">
-                              {questions[currentQuestion].options.map((opt) => (
+                              {(questions[currentQuestion].options || []).map((opt) => (
                                 <button
                                   key={opt}
-                                  onClick={() => setAnswers({ ...answers, [questions[currentQuestion].id]: opt })}
-                                  className={`w-full p-3 rounded-xl text-sm text-left transition-all ${answers[questions[currentQuestion].id] === opt ? 'bg-primary text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+                                  onClick={() => setAnswers({ ...answers, [questions[currentQuestion]._id || currentQuestion]: opt })}
+                                  className={`w-full p-3 rounded-xl text-sm text-left transition-all ${answers[questions[currentQuestion]._id || currentQuestion] === opt ? 'bg-primary text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
                                 >
                                   {opt}
                                 </button>
@@ -719,14 +814,27 @@ const VideoSession = () => {
                             </div>
                           )}
 
-                          {questions[currentQuestion].type === 'text' && (
+                          {(questions[currentQuestion].type === 'text' || questions[currentQuestion].type === 'subjective') && (
                             <textarea
-                              value={answers[questions[currentQuestion].id] || ''}
-                              onChange={(e) => setAnswers({ ...answers, [questions[currentQuestion].id]: e.target.value })}
+                              value={answers[questions[currentQuestion]._id || currentQuestion] || ''}
+                              onChange={(e) => setAnswers({ ...answers, [questions[currentQuestion]._id || currentQuestion]: e.target.value })}
                               placeholder="Type your answer..."
                               rows={4}
                               className="w-full bg-gray-700 text-white placeholder:text-gray-500 px-4 py-3 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none"
                             />
+                          )}
+
+                          {questions[currentQuestion].type === 'image' && (
+                            <div className="space-y-2">
+                              <input
+                                type="url"
+                                value={answers[questions[currentQuestion]._id || currentQuestion] || ''}
+                                onChange={(e) => setAnswers({ ...answers, [questions[currentQuestion]._id || currentQuestion]: e.target.value })}
+                                placeholder="Paste image URL..."
+                                className="w-full bg-gray-700 text-white placeholder:text-gray-500 px-4 py-3 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                              />
+                              <p className="text-xs text-gray-500">Provide a URL to the image</p>
+                            </div>
                           )}
                         </motion.div>
                       </AnimatePresence>
@@ -756,6 +864,11 @@ const VideoSession = () => {
                         )}
                       </div>
                     </>
+                  ) : (
+                    <div className="text-center mt-10 space-y-3">
+                      <ClipboardList className="w-10 h-10 text-gray-600 mx-auto" />
+                      <p className="text-gray-400 text-sm">Waiting for the doctor to send a questionnaire...</p>
+                    </div>
                   )}
                 </div>
               )}
@@ -763,6 +876,54 @@ const VideoSession = () => {
           )}
         </AnimatePresence>
       </div>
+
+      {/* End Session Dialog (Doctor) */}
+      <AnimatePresence>
+        {showEndDialog && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.95 }}
+              className="bg-gray-800 rounded-2xl max-w-md w-full p-6 border border-gray-700"
+            >
+              <h3 className="text-white font-display font-bold text-lg mb-2 flex items-center gap-2">
+                <FileText className="w-5 h-5 text-primary" />
+                Session Description
+              </h3>
+              <p className="text-gray-400 text-sm mb-4">Add a description for this session before ending. This will be visible in the patient's session history.</p>
+              <textarea
+                value={sessionDescription}
+                onChange={(e) => setSessionDescription(e.target.value)}
+                placeholder="Describe what was discussed, progress notes, observations..."
+                rows={5}
+                className="w-full bg-gray-700 text-white placeholder:text-gray-500 px-4 py-3 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none mb-4"
+              />
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowEndDialog(false)}
+                  className="flex-1 px-4 py-2.5 rounded-xl bg-gray-700 text-gray-300 hover:bg-gray-600 text-sm font-medium transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleEndCall}
+                  disabled={savingDescription}
+                  className="flex-1 px-4 py-2.5 rounded-xl bg-danger text-white hover:bg-red-600 text-sm font-medium transition-colors flex items-center justify-center gap-2"
+                >
+                  {savingDescription ? <Loader2 className="w-4 h-4 animate-spin" /> : <PhoneOff className="w-4 h-4" />}
+                  End Session
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Bottom Control Bar */}
       <div className="bg-gray-800/50 backdrop-blur-xl border-t border-gray-700 px-6 py-4">

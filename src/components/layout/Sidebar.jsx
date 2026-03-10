@@ -5,6 +5,7 @@ import {
   Brain, LayoutDashboard, Calendar, Users, BarChart3,
   MessageCircle, Settings, LogOut, Menu, X, Bell, Search, ChevronDown
 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { useAuth } from '../../context/AuthContext';
 
 const Sidebar = ({ links, userRole = 'patient' }) => {
@@ -15,10 +16,10 @@ const Sidebar = ({ links, userRole = 'patient' }) => {
   const { user: authUser, logout } = useAuth();
 
   const displayUser = authUser
-    ? { name: authUser.name, role: authUser.role === 'doctor' ? authUser.specialization || 'Doctor' : 'Patient', avatar: authUser.role === 'doctor' ? '👩‍⚕️' : '👤' }
+    ? { name: authUser.name, role: authUser.role === 'doctor' ? authUser.specialization || 'Doctor' : 'Patient', avatar: authUser.role === 'doctor' ? '👩‍⚕️' : '👤', profilePic: authUser.profilePic }
     : userRole === 'admin'
-      ? { name: 'Doctor', role: 'Clinical Psychologist', avatar: '👩‍⚕️' }
-      : { name: 'Patient', role: 'Patient', avatar: '👤' };
+      ? { name: 'Doctor', role: 'Clinical Psychologist', avatar: '👩‍⚕️', profilePic: null }
+      : { name: 'Patient', role: 'Patient', avatar: '👤', profilePic: null };
 
   const handleLogout = async () => {
     await logout();
@@ -74,8 +75,12 @@ const Sidebar = ({ links, userRole = 'patient' }) => {
       {/* User Card */}
       <div className="p-3 mt-auto">
         <div className={`flex items-center gap-3 p-3 rounded-2xl bg-gray-50 ${collapsed ? 'justify-center' : ''}`}>
-          <div className="w-10 h-10 rounded-xl bg-primary-light flex items-center justify-center text-xl flex-shrink-0">
-            {displayUser.avatar}
+          <div className="w-10 h-10 rounded-xl bg-primary-light flex items-center justify-center text-xl flex-shrink-0 overflow-hidden">
+            {displayUser.profilePic ? (
+              <img src={displayUser.profilePic} alt={displayUser.name} className="w-full h-full object-cover" />
+            ) : (
+              displayUser.avatar
+            )}
           </div>
           {!collapsed && (
             <div className="flex-1 min-w-0">
@@ -106,7 +111,15 @@ const Sidebar = ({ links, userRole = 'patient' }) => {
           </span>
         </Link>
         <div className="flex items-center gap-2">
-          <button className="p-2 rounded-xl hover:bg-gray-100 text-text-secondary relative">
+          <button
+            onClick={() => {
+              toast('No new notifications', {
+                icon: '🔔',
+                style: { borderRadius: '10px', background: '#333', color: '#fff' }
+              });
+            }}
+            className="p-2 rounded-xl hover:bg-gray-100 text-text-secondary relative"
+          >
             <Bell className="w-5 h-5" />
             <span className="absolute top-1 right-1 w-2 h-2 bg-danger rounded-full" />
           </button>

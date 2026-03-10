@@ -16,6 +16,7 @@ import patientRoutes from './routes/patients.js';
 import moodRoutes from './routes/mood.js';
 import messageRoutes from './routes/messages.js';
 import sessionRoutes from './routes/sessions.js';
+import uploadRoutes from './routes/upload.js';
 import { startReminderJob } from './utils/reminderJob.js';
 
 // Load env
@@ -55,6 +56,7 @@ app.use('/api/patients', patientRoutes);
 app.use('/api/mood', moodRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/sessions', sessionRoutes);
+app.use('/api/upload', uploadRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
