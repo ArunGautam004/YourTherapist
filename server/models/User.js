@@ -15,6 +15,8 @@ const userSchema = new mongoose.Schema({
   isActive: { type: Boolean, default: true },
   profileCompleted: { type: Boolean, default: false },
   isVerified: { type: Boolean, default: false },
+  riskLevel: { type: String, enum: ['low', 'medium', 'high', 'critical', ''], default: '' },
+  diagnosis: { type: String, default: '' },
   otp: { type: String },
   otpExpiry: { type: Date },
   lastLogin: { type: Date },

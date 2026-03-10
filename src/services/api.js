@@ -62,10 +62,10 @@ export const doctorAPI = {
   getById: (id) => api.get(`/doctors/${id}`),
 };
 
-// ===== PATIENTS (Doctor) =====
 export const patientAPI = {
   getAll: (params) => api.get('/patients', { params }),
   getById: (id) => api.get(`/patients/${id}`),
+  update: (id, data) => api.put(`/patients/${id}`, data),
   getAnalytics: () => api.get('/patients/analytics'),
 };
 

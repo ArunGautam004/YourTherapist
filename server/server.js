@@ -71,6 +71,6 @@ const PORT = process.env.PORT || 5000;
 httpServer.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📡 Socket.io ready`);
-  console.log(`🌐 CORS: ${process.env.CLIENT_URL || 'http://localhost:5174'}`);
+  console.log(`🌐 CORS: ${process.env.CLIENT_URL || 'http://localhost:5173'}`);
   startReminderJob();
 });

@@ -46,9 +46,9 @@ const Questionnaires = () => {
     const dynamicLinks = [
         { name: 'Dashboard', path: '/admin/dashboard', icon: LayoutDashboard },
         { name: 'Patients', path: '/admin/patients', icon: Users },
-        { name: 'Questionnaires', path: '/admin/questionnaires', icon: ClipboardList },
         { name: 'Calendar', path: '/admin/calendar', icon: Calendar },
         { name: 'Analytics', path: '/admin/analytics', icon: BarChart3 },
+        { name: 'Questionnaires', path: '/admin/questionnaires', icon: ClipboardList },
         { name: 'Messages', path: '/admin/messages', icon: MessageCircle, badge: totalUnread > 0 ? totalUnread.toString() : null },
         { name: 'Settings', path: '/admin/settings', icon: Settings },
     ];

@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard, Users, Calendar, BarChart3, MessageCircle, Settings,
   Search, AlertTriangle, TrendingUp, TrendingDown, Minus,
-  Video, FileText, ClipboardList, ChevronDown, ChevronUp, Save, Loader2, X
+  Video, FileText, ClipboardList, ChevronDown, ChevronUp, Save, Loader2, X, Edit2, Check
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Sidebar from '../../components/layout/Sidebar';
@@ -24,11 +24,18 @@ const AdminPatients = () => {
   const [reportText, setReportText] = useState('');
   const [savingReport, setSavingReport] = useState(false);
 
+  const [isEditingRisk, setIsEditingRisk] = useState(false);
+  const [editRisk, setEditRisk] = useState('');
+  const [isEditingDiagnosis, setIsEditingDiagnosis] = useState(false);
+  const [editDiagnosis, setEditDiagnosis] = useState('');
+  const [savingPatient, setSavingPatient] = useState(false);
+
   const dynamicLinks = [
     { name: 'Dashboard', path: '/admin/dashboard', icon: LayoutDashboard },
     { name: 'Patients', path: '/admin/patients', icon: Users },
     { name: 'Calendar', path: '/admin/calendar', icon: Calendar },
     { name: 'Analytics', path: '/admin/analytics', icon: BarChart3 },
+    { name: 'Questionnaires', path: '/admin/questionnaires', icon: ClipboardList },
     { name: 'Messages', path: '/admin/messages', icon: MessageCircle, badge: totalUnread > 0 ? totalUnread.toString() : null },
     { name: 'Settings', path: '/admin/settings', icon: Settings },
   ];
@@ -117,34 +124,45 @@ const AdminPatients = () => {
     }
   };
 
-  const getRiskBadge = (level) => {
-    const styles = { low: 'bg-success/10 text-success', medium: 'bg-warning/10 text-warning', high: 'bg-danger/10 text-danger' };
-    return styles[level] || styles.low;
+  const handleUpdatePatient = async (field, value) => {
+    try {
+      setSavingPatient(true);
+      await patientAPI.update(selectedPatient._id, { [field]: value });
+      setSelectedPatient(prev => ({ ...prev, [field]: value }));
+      setPatients(patients.map(p => p._id === selectedPatient._id ? { ...p, [field]: value } : p));
+      toast.success('Updated successfully');
+      setIsEditingRisk(false);
+      setIsEditingDiagnosis(false);
+    } catch (err) {
+      toast.error('Failed to update patient');
+    } finally {
+      setSavingPatient(false);
+    }
   };
 
   const getAptDisplayStatus = (apt) => {
-    if (apt.status === 'cancelled') return { label: 'Cancelled', style: 'bg-gray-100 text-text-secondary' };
+    if (apt.status === 'cancelled') return { label: 'Cancelled', style: 'bg-gray-100 text-gray-500' };
     if (apt.status === 'completed') return { label: 'Ended', style: 'bg-success/10 text-success' };
-
+    
     const aptDate = new Date(apt.date);
-    const [time, period] = (apt.time || '').split(' ');
-    if (!time || !period) return { label: apt.status, style: 'bg-gray-100 text-text-secondary' };
-
-    let [h, m] = time.split(':').map(Number);
-    if (period === 'PM' && h !== 12) h += 12;
-    if (period === 'AM' && h === 12) h = 0;
-    aptDate.setHours(h, m || 0, 0, 0);
-
+    const [timeStr, modifier] = apt.time.split(' ');
+    let [hours, minutes] = timeStr.split(':');
+    hours = parseInt(hours, 10);
+    if (hours === 12) hours = 0;
+    if (modifier === 'PM') hours += 12;
+    
+    aptDate.setHours(hours, parseInt(minutes, 10), 0, 0);
     const now = new Date();
-    const endTime = new Date(aptDate.getTime() + 50 * 60 * 1000);
+    const endTime = new Date(aptDate.getTime() + (apt.duration || 50) * 60000);
+    
+    if (now < aptDate) return { label: 'Upcoming', style: 'bg-primary/10 text-primary' };
+    if (now >= aptDate && now <= endTime) return { label: 'Ongoing', style: 'bg-warning/10 text-warning animate-pulse' };
+    return { label: 'Ended', style: 'bg-gray-100 text-text-secondary' };
+  };
 
-    if (now >= new Date(aptDate.getTime() - 10 * 60 * 1000) && now <= endTime) {
-      return { label: 'Ongoing', style: 'bg-primary/20 text-primary font-bold' };
-    }
-    if (now > endTime) {
-      return { label: 'Ended', style: 'bg-success/10 text-success' };
-    }
-    return { label: 'Upcoming', style: 'bg-primary/10 text-primary' };
+  const getRiskBadge = (level) => {
+    const styles = { low: 'bg-success/10 text-success', medium: 'bg-warning/10 text-warning', high: 'bg-danger/10 text-danger' };
+    return styles[level] || styles.low;
   };
 
   const getTrendIcon = (trend) => {
@@ -203,19 +221,62 @@ const AdminPatients = () => {
                 {/* Patient Info */}
                 <div className="card">
                   <div className="text-center mb-6">
-                    <div className="w-20 h-20 rounded-3xl bg-primary-light flex items-center justify-center text-4xl mx-auto mb-4">
-                      👤
+                    <div className="w-20 h-20 rounded-3xl bg-primary-light flex items-center justify-center text-4xl mx-auto mb-4 overflow-hidden">
+                      {selectedPatient.profilePic ? (
+                        <img src={selectedPatient.profilePic} alt={selectedPatient.name} className="w-full h-full object-cover" />
+                      ) : (
+                        <span>👤</span>
+                      )}
                     </div>
                     <h3 className="font-display font-bold text-xl text-text-primary">{selectedPatient.name}</h3>
                     <p className="text-sm text-text-secondary">{selectedPatient.gender || ''}</p>
-                    <span className={`inline-block mt-2 text-xs px-3 py-1 rounded-full font-medium uppercase ${getRiskBadge(selectedPatient.riskLevel)}`}>
-                      {selectedPatient.riskLevel || 'low'} risk
-                    </span>
+                    <div className="flex items-center justify-center gap-2 mt-2">
+                      {isEditingRisk ? (
+                        <div className="flex items-center gap-1">
+                          <select 
+                            value={editRisk} 
+                            onChange={(e) => setEditRisk(e.target.value)}
+                            className="text-xs p-1 border rounded"
+                          >
+                            <option value="low">Low Risk</option>
+                            <option value="medium">Medium Risk</option>
+                            <option value="high">High Risk</option>
+                            <option value="critical">Critical Risk</option>
+                          </select>
+                          <button onClick={() => handleUpdatePatient('riskLevel', editRisk)} disabled={savingPatient} className="text-success"><Check className="w-4 h-4"/></button>
+                          <button onClick={() => setIsEditingRisk(false)} className="text-text-secondary"><X className="w-4 h-4"/></button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <span className={`inline-block text-xs px-3 py-1 rounded-full font-medium uppercase ${getRiskBadge(selectedPatient.riskLevel)}`}>
+                            {selectedPatient.riskLevel || 'low'} risk
+                          </span>
+                          <button onClick={() => { setEditRisk(selectedPatient.riskLevel || 'low'); setIsEditingRisk(true); }} className="p-1 hover:bg-gray-100 rounded text-text-secondary">
+                            <Edit2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                   <div className="space-y-3">
-                    <div className="p-3 rounded-xl bg-gray-50">
-                      <p className="text-xs text-text-secondary">Diagnosis</p>
-                      <p className="text-sm font-medium text-text-primary">{selectedPatient.diagnosis || 'Not assessed yet'}</p>
+                    <div className="p-3 rounded-xl bg-gray-50 group/diag relative">
+                      <div className="flex justify-between items-start">
+                        <p className="text-xs text-text-secondary">Diagnosis</p>
+                        {!isEditingDiagnosis && (
+                          <button onClick={() => { setEditDiagnosis(selectedPatient.diagnosis || ''); setIsEditingDiagnosis(true); }} className="p-1 hover:bg-gray-200 rounded text-text-secondary opacity-0 group-hover/diag:opacity-100 transition-opacity">
+                            <Edit2 className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
+                      {isEditingDiagnosis ? (
+                         <div className="flex items-center gap-1 mt-1">
+                           <input type="text" value={editDiagnosis} onChange={e => setEditDiagnosis(e.target.value)} className="flex-1 text-sm p-1 border rounded" autoFocus />
+                           <button onClick={() => handleUpdatePatient('diagnosis', editDiagnosis)} disabled={savingPatient} className="text-success"><Check className="w-4 h-4"/></button>
+                           <button onClick={() => setIsEditingDiagnosis(false)} className="text-text-secondary"><X className="w-4 h-4"/></button>
+                         </div>
+                      ) : (
+                        <p className="text-sm font-medium text-text-primary mt-0.5">{selectedPatient.diagnosis || 'Not assessed yet'}</p>
+                      )}
                     </div>
                     <div className="p-3 rounded-xl bg-gray-50">
                       <p className="text-xs text-text-secondary">Email</p>
@@ -267,20 +328,25 @@ const AdminPatients = () => {
                                   </td>
                                   <td className="py-3 px-2 text-sm text-text-secondary">{apt.time}</td>
                                   <td className="py-3 px-2 text-right">
-                                    <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full uppercase
-                                      ${apt.status === 'completed' ? 'bg-success/10 text-success' :
-                                        apt.status === 'scheduled' ? 'bg-primary/10 text-primary' :
-                                          'bg-gray-100 text-text-secondary'}`}>
-                                      {apt.status}
-                                    </span>
+                                    {(() => {
+                                      const status = getAptDisplayStatus(apt);
+                                      return (
+                                        <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full uppercase ${status.style}`}>
+                                          {status.label}
+                                        </span>
+                                      );
+                                    })()}
                                   </td>
                                   <td className="py-3 px-2 text-right">
                                     {isLoading ? (
-                                      <Loader2 className="w-4 h-4 animate-spin text-primary" />
-                                    ) : isExpanded ? (
-                                      <ChevronUp className="w-4 h-4 text-text-secondary" />
+                                      <Loader2 className="w-4 h-4 animate-spin text-primary ml-auto" />
                                     ) : (
-                                      <ChevronDown className="w-4 h-4 text-text-secondary" />
+                                      <button 
+                                        onClick={(e) => { e.stopPropagation(); handleExpandApt(aptId); }}
+                                        className="text-xs font-semibold text-primary bg-primary/10 px-3 py-1.5 rounded-lg hover:bg-primary/20 transition-colors inline-flex items-center justify-center gap-1 ml-auto"
+                                      >
+                                        View Details {isExpanded ? <ChevronUp className="w-3 h-3"/> : <ChevronDown className="w-3 h-3"/>}
+                                      </button>
                                     )}
                                   </td>
                                 </tr>
@@ -334,27 +400,40 @@ const AdminPatients = () => {
                                           </div>
 
                                           {/* Questionnaire Responses */}
-                                          {detail.questionnaireResponses?.length > 0 && (
-                                            <div>
-                                              <h5 className="text-sm font-semibold text-text-primary mb-2 flex items-center gap-1">
-                                                <ClipboardList className="w-4 h-4 text-primary" /> Questionnaire Responses
-                                              </h5>
-                                              <div className="space-y-2">
+                                          <div className="mt-4 pt-4 border-t border-gray-100">
+                                            <h5 className="text-sm font-semibold text-text-primary mb-3 flex items-center gap-1">
+                                              <ClipboardList className="w-4 h-4 text-primary" /> Questionnaire Responses
+                                            </h5>
+                                            {detail.questionnaireResponses?.length > 0 ? (
+                                              <div className="space-y-3">
                                                 {detail.questionnaireResponses.map((qr, qi) => (
-                                                  <div key={qi} className="bg-white p-3 rounded-xl border border-gray-100">
-                                                    <p className="text-xs font-medium text-primary mb-1">{qr.template?.title || 'Questionnaire'}</p>
-                                                    {(qr.responses || []).map((r, ri) => (
-                                                      <div key={ri} className="text-xs mt-1">
-                                                        <span className="text-text-secondary">{r.questionText}: </span>
-                                                        <span className="font-medium text-text-primary">{r.answer}</span>
+                                                  <div key={qi} className="bg-gray-50 p-4 rounded-xl border border-gray-100">
+                                                    <div className="flex items-center justify-between mb-3">
+                                                      <div>
+                                                          <p className="text-sm font-bold text-primary">{qr.template?.title || 'Questionnaire'}</p>
+                                                          {qr.template?.diseaseName && <span className="text-xs text-text-secondary">{qr.template.diseaseName}</span>}
                                                       </div>
-                                                    ))}
-                                                    {qr.totalScore > 0 && <p className="text-xs font-bold text-primary mt-1">Score: {qr.totalScore}</p>}
+                                                      {qr.totalScore > 0 && <span className="text-sm font-bold bg-primary/10 text-primary px-3 py-1 rounded-lg">Score: {qr.totalScore}</span>}
+                                                    </div>
+                                                    <div className="space-y-2">
+                                                      {(qr.responses || []).map((r, ri) => (
+                                                        <div key={ri} className="bg-white p-3 rounded-lg border border-gray-100 shadow-sm">
+                                                          <p className="text-xs text-text-secondary mb-1">{r.questionText}</p>
+                                                          <p className="text-sm font-medium text-text-primary break-words">
+                                                            {r.type === 'image' && typeof r.answer === 'string' && r.answer.startsWith('http') ? (
+                                                              <a href={r.answer} target="_blank" rel="noreferrer" className="text-primary hover:underline">View Uploaded Image</a>
+                                                            ) : r.answer}
+                                                          </p>
+                                                        </div>
+                                                      ))}
+                                                    </div>
                                                   </div>
                                                 ))}
                                               </div>
-                                            </div>
-                                          )}
+                                            ) : (
+                                              <p className="text-sm text-text-secondary italic">No questionnaires submitted for this session.</p>
+                                            )}
+                                          </div>
                                         </div>
                                       ) : (
                                         <p className="text-sm text-text-secondary italic text-center py-4">No details available</p>

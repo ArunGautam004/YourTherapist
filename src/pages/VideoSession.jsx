@@ -81,6 +81,7 @@ const VideoSession = () => {
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [answers, setAnswers] = useState({});
   const [questionnaireSubmitted, setQuestionnaireSubmitted] = useState(false);
+  const [activeTemplateId, setActiveTemplateId] = useState(null);
 
   // Session description (doctor)
   const [sessionDescription, setSessionDescription] = useState('');
@@ -319,6 +320,7 @@ const VideoSession = () => {
       setQuestionnaireSubmitted(false);
       setShowQuestionnaire(true);
       setShowChat(false);
+      if (data.templateId) setActiveTemplateId(data.templateId);
       toast('Received a questionnaire from doctor', { icon: '📋' });
     };
 
@@ -439,13 +441,38 @@ const VideoSession = () => {
     }
   };
 
-  const handleSubmitQuestionnaire = () => {
+  const handleSubmitQuestionnaire = async () => {
     setQuestionnaireSubmitted(true);
     const socket = getSocket();
     if (socket) socket.emit('questionnaire:submit', { roomId, responses: answers });
+
+    try {
+      if (user?.role !== 'doctor' && user?.role !== 'admin' && activeTemplateId && appointment?.doctor?._id) {
+        const formattedResponses = Object.keys(answers).map(idx => {
+          const q = questions[parseInt(idx)] || {};
+          return {
+            questionId: q._id || String(idx),
+            questionText: q.text || `Question ${parseInt(idx) + 1}`,
+            type: q.type || 'text',
+            answer: answers[idx]
+          };
+        });
+
+        await sessionAPI.submitResponse({
+          templateId: activeTemplateId,
+          appointmentId: roomId,
+          doctorId: appointment.doctor._id,
+          responses: formattedResponses
+        });
+      }
+    } catch (err) {
+      console.error('Failed to save questionnaire response:', err);
+    }
+
     setTimeout(() => {
       setShowQuestionnaire(false);
       setQuestionnaireSubmitted(false);
+      setActiveTemplateId(null);
     }, 2000);
   };
 

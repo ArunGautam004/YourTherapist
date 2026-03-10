@@ -176,9 +176,11 @@ export const getAnalytics = async (req, res, next) => {
         $match: {
           doctor: doctorId,
           paymentStatus: 'paid',
-          date: { $gte: todayStart, $lt: todayEnd },
-          status: { $nin: ['completed', 'cancelled'] },
-          date: { $gte: todayUTC }
+          $and: [
+            { date: { $gte: todayStart, $lt: todayEnd } },
+            { date: { $gte: todayUTC } }
+          ],
+          status: { $nin: ['completed', 'cancelled'] }
         }
       },
       { $group: { _id: null, total: { $sum: '$fee' } } }
@@ -278,6 +280,29 @@ export const getAnalytics = async (req, res, next) => {
       dailyData,
       monthlyData,
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Update Patient Risk and Diagnosis
+// @route   PUT /api/patients/:id
+export const updatePatientInfo = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { riskLevel, diagnosis } = req.body;
+
+    const patient = await User.findById(id);
+    if (!patient || patient.role !== 'patient') {
+      return res.status(404).json({ success: false, message: 'Patient not found' });
+    }
+
+    if (riskLevel !== undefined) patient.riskLevel = riskLevel;
+    if (diagnosis !== undefined) patient.diagnosis = diagnosis;
+
+    await patient.save();
+
+    res.status(200).json({ success: true, data: patient });
   } catch (error) {
     next(error);
   }
