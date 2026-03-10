@@ -1,0 +1,90 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply font-sans text-text-primary bg-background antialiased;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-primary text-white font-semibold px-6 py-3 rounded-2xl
+           hover:bg-primary-dark transition-all duration-300 ease-out
+           shadow-soft hover:shadow-glow active:scale-[0.98]
+           focus:outline-none focus:ring-2 focus:ring-primary/40;
+  }
+
+  .btn-secondary {
+    @apply bg-secondary text-white font-semibold px-6 py-3 rounded-2xl
+           hover:bg-secondary-dark transition-all duration-300 ease-out
+           shadow-soft hover:shadow-soft-lg active:scale-[0.98]
+           focus:outline-none focus:ring-2 focus:ring-secondary/40;
+  }
+
+  .btn-outline {
+    @apply border-2 border-primary text-primary font-semibold px-6 py-3 rounded-2xl
+           hover:bg-primary hover:text-white transition-all duration-300 ease-out
+           active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-primary/40;
+  }
+
+  .card {
+    @apply bg-white rounded-3xl shadow-soft p-6
+           transition-all duration-300 hover:shadow-soft-lg;
+  }
+
+  .glass {
+    @apply bg-white/70 backdrop-blur-xl border border-white/20 rounded-3xl;
+  }
+
+  .input-field {
+    @apply w-full px-4 py-3 rounded-2xl border border-gray-200
+           bg-white text-text-primary placeholder:text-text-secondary/60
+           focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary
+           transition-all duration-200;
+  }
+
+  .gradient-text {
+    @apply bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent;
+  }
+
+  .section-heading {
+    @apply font-display text-3xl md:text-4xl lg:text-5xl font-bold text-text-primary;
+  }
+
+  .sidebar-link {
+    @apply flex items-center gap-3 px-4 py-3 rounded-2xl text-text-secondary
+           hover:bg-primary-light hover:text-primary transition-all duration-200 font-medium;
+  }
+
+  .sidebar-link-active {
+    @apply flex items-center gap-3 px-4 py-3 rounded-2xl bg-primary text-white
+           shadow-glow font-medium;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-gray-100 rounded-full;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-gray-300 rounded-full hover:bg-gray-400;
+}
