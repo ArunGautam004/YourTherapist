@@ -29,22 +29,25 @@ const VideoSession = () => {
   const { id: roomId } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
-  
+
   const [isInWaitingRoom, setIsInWaitingRoom] = useState(true);
   const [sessionActive, setSessionActive] = useState(false);
   const [micOn, setMicOn] = useState(true);
   const [videoOn, setVideoOn] = useState(true);
   const [showChat, setShowChat] = useState(false);
+  const showChatRef = useRef(false);
+  useEffect(() => { showChatRef.current = showChat; }, [showChat]);
+
   const [showQuestionnaire, setShowQuestionnaire] = useState(false);
-  
+
   const [chatMessage, setChatMessage] = useState('');
   const [chatMessages, setChatMessages] = useState([]);
-  
+
   const [questions, setQuestions] = useState(defaultQuestions);
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [answers, setAnswers] = useState({});
   const [questionnaireSubmitted, setQuestionnaireSubmitted] = useState(false);
-  
+
   const [appointment, setAppointment] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -53,7 +56,7 @@ const VideoSession = () => {
   const remoteVideoRef = useRef(null);
   const peerConnection = useRef(null);
   const localStream = useRef(null);
-  
+
   // Custom waiting room check
   useEffect(() => {
     const fetchAppointment = async () => {
@@ -117,7 +120,7 @@ const VideoSession = () => {
 
     // Initialize WebRTC Peer Connection
     peerConnection.current = new RTCPeerConnection(servers);
-    
+
     // Add local tracks to PC
     localStream.current.getTracks().forEach(track => {
       peerConnection.current.addTrack(track, localStream.current);
@@ -139,8 +142,8 @@ const VideoSession = () => {
 
     // Socket Event Listeners for WebRTC
     const handleCallReady = async () => {
-      // Caller (Doctor) creates the offer
-      if (user?.role === 'doctor') {
+      // Caller (Doctor/Admin) creates the offer
+      if (user?.role === 'doctor' || user?.role === 'admin') {
         try {
           const offer = await peerConnection.current.createOffer();
           await peerConnection.current.setLocalDescription(offer);
@@ -188,7 +191,7 @@ const VideoSession = () => {
     // Chat and Questionnaire Events
     const handleRoomMessage = (msg) => {
       setChatMessages(prev => [...prev, msg]);
-      if (!showChat) toast('New message in chat', { icon: '💬' });
+      if (!showChatRef.current) toast('New message in chat', { icon: '💬' });
     };
 
     const handleQuestionnaireReceive = (q) => {
@@ -212,7 +215,7 @@ const VideoSession = () => {
     socket.on('call:answer', handleCallAnswer);
     socket.on('call:ice-candidate', handleIceCandidate);
     socket.on('call:ended', handleCallEnded);
-    
+
     // Using a custom room message event just for the video session chat
     socket.on('room:message', handleRoomMessage);
     socket.on('questionnaire:receive', handleQuestionnaireReceive);
@@ -231,13 +234,13 @@ const VideoSession = () => {
       socket.off('room:message', handleRoomMessage);
       socket.off('questionnaire:receive', handleQuestionnaireReceive);
       socket.off('questionnaire:response', handleQuestionnaireResponse);
-      
+
       socket.emit('call:end', roomId);
       if (peerConnection.current) {
         peerConnection.current.close();
       }
     };
-  }, [sessionActive, roomId, user, navigate, showChat]);
+  }, [sessionActive, roomId, user, navigate]);
 
   // Keep local video attached if re-rendered
   useEffect(() => {
@@ -263,13 +266,13 @@ const VideoSession = () => {
   const handleSendMessage = (e) => {
     e.preventDefault();
     if (!chatMessage.trim()) return;
-    
+
     const msg = { sender: user?.role || 'patient', text: chatMessage.trim(), time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
     setChatMessages(prev => [...prev, msg]);
-    
+
     const socket = getSocket();
     if (socket) socket.emit('room:message', { roomId, message: msg });
-    
+
     setChatMessage('');
   };
 
@@ -287,7 +290,7 @@ const VideoSession = () => {
     setQuestionnaireSubmitted(true);
     const socket = getSocket();
     if (socket) socket.emit('questionnaire:submit', { roomId, responses: answers });
-    
+
     setTimeout(() => {
       setShowQuestionnaire(false);
       setQuestionnaireSubmitted(false);
@@ -348,7 +351,7 @@ const VideoSession = () => {
 
           <h2 className="font-display text-2xl font-bold text-white mb-2">Waiting Room</h2>
           <p className="text-gray-400 mb-2">Your session with <span className="text-white font-medium">{appointment?.doctor?.name || 'Doctor'}</span></p>
-          
+
           <div className="flex items-center justify-center gap-2 text-primary-300 mb-8">
             <Clock className="w-4 h-4 animate-pulse" />
             <span className="text-sm font-medium">Session scheduled for today</span>
@@ -410,7 +413,7 @@ const VideoSession = () => {
             <div className="w-2 h-2 bg-danger rounded-full animate-pulse" />
             <span className="font-medium">Live</span>
           </div>
-          
+
           <div className="absolute top-4 right-4 bg-black/40 backdrop-blur-sm text-white px-4 py-2 rounded-xl text-sm font-medium z-10">
             🔒 Encrypted
           </div>
@@ -502,13 +505,13 @@ const VideoSession = () => {
                       <AnimatePresence mode="wait">
                         <motion.div key={currentQuestion} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
                           <p className="text-white font-medium mb-4 leading-relaxed">{questions[currentQuestion].text}</p>
-                          
+
                           {questions[currentQuestion].type === 'scale' && (
                             <div className="flex flex-wrap gap-2">
                               {questions[currentQuestion].options.map((opt) => (
                                 <button
                                   key={opt}
-                                  onClick={() => setAnswers({...answers, [questions[currentQuestion].id]: opt})}
+                                  onClick={() => setAnswers({ ...answers, [questions[currentQuestion].id]: opt })}
                                   className={`w-10 h-10 rounded-xl text-sm font-bold transition-all ${answers[questions[currentQuestion].id] === opt ? 'bg-primary text-white shadow-glow' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
                                 >
                                   {opt}
@@ -522,7 +525,7 @@ const VideoSession = () => {
                               {questions[currentQuestion].options.map((opt) => (
                                 <button
                                   key={opt}
-                                  onClick={() => setAnswers({...answers, [questions[currentQuestion].id]: opt})}
+                                  onClick={() => setAnswers({ ...answers, [questions[currentQuestion].id]: opt })}
                                   className={`w-full p-3 rounded-xl text-sm text-left transition-all ${answers[questions[currentQuestion].id] === opt ? 'bg-primary text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
                                 >
                                   {opt}
@@ -534,7 +537,7 @@ const VideoSession = () => {
                           {questions[currentQuestion].type === 'text' && (
                             <textarea
                               value={answers[questions[currentQuestion].id] || ''}
-                              onChange={(e) => setAnswers({...answers, [questions[currentQuestion].id]: e.target.value})}
+                              onChange={(e) => setAnswers({ ...answers, [questions[currentQuestion].id]: e.target.value })}
                               placeholder="Type your answer..."
                               rows={4}
                               className="w-full bg-gray-700 text-white placeholder:text-gray-500 px-4 py-3 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none"

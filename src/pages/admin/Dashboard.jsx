@@ -76,7 +76,7 @@ const AdminDashboard = () => {
   const [notifications, setNotifications] = useState([
     { id: 1, title: 'New Patient', desc: 'A new patient has registered', time: '10 min ago', read: false }
   ]);
-  
+
   const unreadCount = notifications.filter(n => !n.read).length;
 
   const getGreeting = () => {
@@ -99,10 +99,10 @@ const AdminDashboard = () => {
               </h1>
               <p className="text-text-secondary mt-1">Here's your practice overview for today.</p>
             </div>
-            
+
             {/* Notification Dropdown */}
             <div className="relative">
-              <button 
+              <button
                 onClick={() => {
                   setShowNotifications(!showNotifications);
                   setNotifications(prev => prev.map(n => ({ ...n, read: true })));
@@ -117,7 +117,7 @@ const AdminDashboard = () => {
 
               <AnimatePresence>
                 {showNotifications && (
-                  <motion.div 
+                  <motion.div
                     initial={{ opacity: 0, y: 10, scale: 0.95 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: 10, scale: 0.95 }}
@@ -175,27 +175,42 @@ const AdminDashboard = () => {
                 </div>
                 {todaySessions.length > 0 ? (
                   <div className="space-y-2">
-                    {todaySessions.map((session) => (
-                      <div key={session._id} className="flex items-center gap-3 p-3 rounded-2xl hover:bg-gray-50 transition-colors">
-                        <div className="w-10 h-10 rounded-xl bg-primary-light flex items-center justify-center text-xl flex-shrink-0">
-                          👤
+                    {todaySessions.map((session) => {
+                      const aptDate = new Date(session.date);
+                      const [tPart, tPeriod] = (session.time || '').split(' ');
+                      let [tH, tM] = (tPart || '0:0').split(':').map(Number);
+                      if (tPeriod === 'PM' && tH !== 12) tH += 12;
+                      if (tPeriod === 'AM' && tH === 12) tH = 0;
+                      aptDate.setHours(tH, tM || 0, 0, 0);
+                      const now = new Date();
+                      const diff = (aptDate - now) / 60000;
+                      const isExpired = diff <= -(session.duration || 50);
+                      const isJoinable = diff <= 15 && !isExpired;
+
+                      const displayStatus = isExpired && session.status === 'scheduled' ? 'expired' : session.status;
+
+                      return (
+                        <div key={session._id} className="flex items-center gap-3 p-3 rounded-2xl hover:bg-gray-50 transition-colors">
+                          <div className="w-10 h-10 rounded-xl bg-primary-light flex items-center justify-center text-xl flex-shrink-0">
+                            👤
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-text-primary truncate">{session.patient?.name}</p>
+                            <p className="text-xs text-text-secondary flex items-center gap-1">
+                              <Clock className="w-3 h-3" /> {session.time} • {session.duration || 50} min
+                            </p>
+                          </div>
+                          <span className={`text-xs px-2.5 py-1 rounded-full font-medium capitalize ${displayStatus === 'expired' ? 'bg-gray-100 text-text-secondary' : getStatusBadge(session.status)}`}>
+                            {displayStatus}
+                          </span>
+                          {session.meetingLink && isJoinable && (session.status === 'upcoming' || session.status === 'scheduled') && (
+                            <Link to={session.meetingLink || '#'} className="btn-primary !px-3 !py-1.5 text-xs flex items-center gap-1">
+                              <Video className="w-3.5 h-3.5" /> Start
+                            </Link>
+                          )}
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-text-primary truncate">{session.patient?.name}</p>
-                          <p className="text-xs text-text-secondary flex items-center gap-1">
-                            <Clock className="w-3 h-3" /> {session.time} • {session.duration || 50} min
-                          </p>
-                        </div>
-                        <span className={`text-xs px-2.5 py-1 rounded-full font-medium capitalize ${getStatusBadge(session.status)}`}>
-                          {session.status}
-                        </span>
-                        {(session.status === 'upcoming' || session.status === 'scheduled') && (
-                          <Link to={session.meetingLink || '#'} className="btn-primary !px-3 !py-1.5 text-xs flex items-center gap-1">
-                            <Video className="w-3.5 h-3.5" /> Start
-                          </Link>
-                        )}
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 ) : (
                   <p className="text-center py-8 text-text-secondary text-sm">No sessions scheduled for today</p>
