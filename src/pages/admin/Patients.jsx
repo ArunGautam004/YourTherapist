@@ -6,16 +6,7 @@ import {
   Video, FileText
 } from 'lucide-react';
 import Sidebar from '../../components/layout/Sidebar';
-import { patientAPI, sessionAPI } from '../../services/api';
-
-const adminLinks = [
-  { name: 'Dashboard', path: '/admin/dashboard', icon: LayoutDashboard },
-  { name: 'Patients', path: '/admin/patients', icon: Users },
-  { name: 'Calendar', path: '/admin/calendar', icon: Calendar },
-  { name: 'Analytics', path: '/admin/analytics', icon: BarChart3 },
-  { name: 'Messages', path: '/admin/messages', icon: MessageCircle, badge: '5' },
-  { name: 'Settings', path: '/admin/settings', icon: Settings },
-];
+import { patientAPI, sessionAPI, messageAPI } from '../../services/api';
 
 const AdminPatients = () => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -24,21 +15,36 @@ const AdminPatients = () => {
   const [patients, setPatients] = useState([]);
   const [patientDetail, setPatientDetail] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [totalUnread, setTotalUnread] = useState(0);
 
-  useEffect(() => {
-    fetchPatients();
-  }, []);
+  const dynamicLinks = [
+    { name: 'Dashboard', path: '/admin/dashboard', icon: LayoutDashboard },
+    { name: 'Patients', path: '/admin/patients', icon: Users },
+    { name: 'Calendar', path: '/admin/calendar', icon: Calendar },
+    { name: 'Analytics', path: '/admin/analytics', icon: BarChart3 },
+    { name: 'Messages', path: '/admin/messages', icon: MessageCircle, badge: totalUnread > 0 ? totalUnread.toString() : null },
+    { name: 'Settings', path: '/admin/settings', icon: Settings },
+  ];
 
   const fetchPatients = async () => {
     try {
-      const { data } = await patientAPI.getAll({ search: searchQuery, riskLevel: filterRisk });
+      const [{ data }, { data: msgData }] = await Promise.all([
+        patientAPI.getAll({ search: searchQuery, riskLevel: filterRisk }),
+        messageAPI.getConversations().catch(() => ({ data: { conversations: [] } }))
+      ]);
       setPatients(data.patients || []);
+      const unread = (msgData.conversations || []).reduce((sum, c) => sum + (c.unreadCount || 0), 0);
+      setTotalUnread(unread);
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchPatients();
+  }, []);
 
   useEffect(() => {
     fetchPatients();
@@ -59,6 +65,31 @@ const AdminPatients = () => {
     return styles[level] || styles.low;
   };
 
+  const getAptDisplayStatus = (apt) => {
+    if (apt.status === 'cancelled') return { label: 'Cancelled', style: 'bg-gray-100 text-text-secondary' };
+    if (apt.status === 'completed') return { label: 'Ended', style: 'bg-success/10 text-success' };
+
+    const aptDate = new Date(apt.date);
+    const [time, period] = (apt.time || '').split(' ');
+    if (!time || !period) return { label: apt.status, style: 'bg-gray-100 text-text-secondary' };
+
+    let [h, m] = time.split(':').map(Number);
+    if (period === 'PM' && h !== 12) h += 12;
+    if (period === 'AM' && h === 12) h = 0;
+    aptDate.setHours(h, m || 0, 0, 0);
+
+    const now = new Date();
+    const endTime = new Date(aptDate.getTime() + 50 * 60 * 1000);
+
+    if (now >= new Date(aptDate.getTime() - 10 * 60 * 1000) && now <= endTime) {
+      return { label: 'Ongoing', style: 'bg-primary/20 text-primary font-bold' };
+    }
+    if (now > endTime) {
+      return { label: 'Ended', style: 'bg-success/10 text-success' };
+    }
+    return { label: 'Upcoming', style: 'bg-primary/10 text-primary' };
+  };
+
   const getTrendIcon = (trend) => {
     if (trend === 'up') return <TrendingUp className="w-4 h-4 text-success" />;
     if (trend === 'down') return <TrendingDown className="w-4 h-4 text-danger" />;
@@ -67,7 +98,7 @@ const AdminPatients = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      <Sidebar links={adminLinks} userRole="admin" />
+      <Sidebar links={dynamicLinks} userRole="admin" />
 
       <main className="lg:ml-[260px] pt-20 lg:pt-6 p-4 md:p-6 lg:p-8">
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="max-w-7xl mx-auto">
@@ -144,27 +175,75 @@ const AdminPatients = () => {
                   </div>
                 </div>
 
-                {/* Session History */}
-                <div className="lg:col-span-2 card">
-                  <h3 className="font-display font-bold text-lg text-text-primary mb-5">Session History</h3>
-                  <div className="space-y-3">
-                    {(patientDetail?.sessionNotes || []).map((note, i) => (
-                      <div key={note._id || i} className="p-4 rounded-2xl border border-gray-100 hover:border-primary/20 transition-colors">
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="text-sm font-semibold text-text-primary">
-                            {new Date(note.createdAt).toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' })}
-                          </span>
-                          <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${getRiskBadge(note.riskLevel)}`}>
-                            {note.progressStatus || 'Initial'}
-                          </span>
+                {/* Session & Note History */}
+                <div className="lg:col-span-2 space-y-6">
+                  {/* Appointment History */}
+                  <div className="card">
+                    <h3 className="font-display font-bold text-lg text-text-primary mb-5">Appointment History</h3>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left">
+                        <thead>
+                          <tr className="text-xs font-semibold text-text-secondary uppercase tracking-wider border-b border-gray-100">
+                            <th className="pb-3 px-2">Date</th>
+                            <th className="pb-3 px-2">Time</th>
+                            <th className="pb-3 px-2">Type</th>
+                            <th className="pb-3 px-2 text-right">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50">
+                          {(patientDetail?.appointments || []).map((apt, i) => (
+                            <tr key={apt._id || i} className="group hover:bg-gray-50/50 transition-colors">
+                              <td className="py-3 px-2 whitespace-nowrap">
+                                <span className="text-sm font-medium text-text-primary">
+                                  {new Date(apt.date).toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                </span>
+                              </td>
+                              <td className="py-3 px-2 text-sm text-text-secondary">{apt.time}</td>
+                              <td className="py-3 px-2">
+                                <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-text-secondary capitalize">
+                                  {apt.type}
+                                </span>
+                              </td>
+                              <td className="py-3 px-2 text-right">
+                                <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full uppercase
+                                  ${apt.status === 'completed' ? 'bg-success/10 text-success' :
+                                    apt.status === 'scheduled' ? 'bg-primary/10 text-primary' :
+                                      'bg-gray-100 text-text-secondary'}`}>
+                                  {apt.status}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      {(!patientDetail?.appointments || patientDetail.appointments.length === 0) && (
+                        <p className="text-center py-8 text-text-secondary text-sm">No appointment history found</p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Clinical Session Notes */}
+                  <div className="card">
+                    <h3 className="font-display font-bold text-lg text-text-primary mb-5">Clinical Session Notes</h3>
+                    <div className="space-y-3">
+                      {(patientDetail?.sessionNotes || []).map((note, i) => (
+                        <div key={note._id || i} className="p-4 rounded-2xl border border-gray-100 hover:border-primary/20 transition-colors">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-sm font-semibold text-text-primary">
+                              {new Date(note.createdAt).toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' })}
+                            </span>
+                            <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${getRiskBadge(note.riskLevel)}`}>
+                              {note.progressStatus || 'Initial'}
+                            </span>
+                          </div>
+                          {note.assessment && <p className="text-sm text-text-secondary leading-relaxed mb-1">{note.assessment}</p>}
+                          {note.plan && <p className="text-sm text-text-secondary leading-relaxed">{note.plan}</p>}
                         </div>
-                        {note.assessment && <p className="text-sm text-text-secondary leading-relaxed mb-1">{note.assessment}</p>}
-                        {note.plan && <p className="text-sm text-text-secondary leading-relaxed">{note.plan}</p>}
-                      </div>
-                    ))}
-                    {(!patientDetail?.sessionNotes || patientDetail.sessionNotes.length === 0) && (
-                      <p className="text-center py-8 text-text-secondary text-sm">No session notes yet</p>
-                    )}
+                      ))}
+                      {(!patientDetail?.sessionNotes || patientDetail.sessionNotes.length === 0) && (
+                        <p className="text-center py-8 text-text-secondary text-sm">No clinical notes yet</p>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>

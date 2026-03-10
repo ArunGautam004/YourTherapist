@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import Sidebar from '../../components/layout/Sidebar';
 import { useAuth } from '../../context/AuthContext';
-import { appointmentAPI, patientAPI } from '../../services/api';
+import { appointmentAPI, patientAPI, messageAPI } from '../../services/api';
 
 const fadeInUp = {
   hidden: { opacity: 0, y: 20 },
@@ -35,17 +35,23 @@ const AdminDashboard = () => {
   const [analytics, setAnalytics] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  const [totalUnreadMessages, setTotalUnreadMessages] = useState(0);
+
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [todayRes, patientsRes, analyticsRes] = await Promise.all([
+        const [todayRes, patientsRes, analyticsRes, messagesRes] = await Promise.all([
           appointmentAPI.getToday().catch(() => ({ data: { appointments: [] } })),
           patientAPI.getAll().catch(() => ({ data: { patients: [] } })),
           patientAPI.getAnalytics().catch(() => ({ data: {} })),
+          messageAPI.getConversations().catch(() => ({ data: { conversations: [] } })),
         ]);
         setTodaySessions(todayRes.data.appointments || []);
         setPatients(patientsRes.data.patients?.slice(0, 4) || []);
         setAnalytics(analyticsRes.data || null);
+
+        const unread = (messagesRes.data.conversations || []).reduce((sum, c) => sum + (c.unreadCount || 0), 0);
+        setTotalUnreadMessages(unread);
       } catch (err) {
         console.error('Admin dashboard load error:', err);
       } finally {
@@ -57,9 +63,44 @@ const AdminDashboard = () => {
 
   const stats = [
     { label: 'Total Patients', value: analytics?.totalPatients || '—', change: 'All time', icon: Users, color: 'from-primary to-emerald-400' },
-    { label: 'Sessions Today', value: todaySessions.length, change: `${todaySessions.filter(s => s.status !== 'completed').length} remaining`, icon: Video, color: 'from-secondary to-purple-400' },
-    { label: 'Revenue', value: analytics?.totalRevenue ? `₹${(analytics.totalRevenue / 1000).toFixed(0)}K` : '—', change: 'Total', icon: TrendingUp, color: 'from-amber-500 to-orange-400' },
-    { label: 'Total Sessions', value: analytics?.totalSessions || '—', change: 'Completed', icon: BarChart3, color: 'from-pink-500 to-rose-400' },
+    {
+      label: 'Sessions Today',
+      value: todaySessions.filter(s => s.status !== 'cancelled' && s.paymentStatus === 'paid').length,
+      change: 'Total scheduled',
+      icon: Clock,
+      color: 'from-secondary to-purple-400'
+    },
+    {
+      label: 'Remaining Today',
+      value: todaySessions.filter(s => {
+        const aptDate = new Date(s.date);
+        const [tPart, tPeriod] = (s.time || '').split(' ');
+        let [tH, tM] = (tPart || '0:0').split(':').map(Number);
+        if (tPeriod === 'PM' && tH !== 12) tH += 12;
+        if (tPeriod === 'AM' && tH === 12) tH = 0;
+        aptDate.setHours(tH, tM || 0, 0, 0);
+
+        const endTime = new Date(aptDate.getTime() + (s.duration || 50) * 60000);
+        const now = new Date();
+        const diff = (aptDate - now) / 60000;
+
+        // Ongoing = within 10 mins of start OR has started and not yet ended
+        const isOngoing = diff <= 10 && now < endTime && s.status !== 'cancelled';
+        const isUpcoming = aptDate > now && s.status !== 'cancelled';
+
+        return (isOngoing || isUpcoming) && !['completed', 'no-show'].includes(s.status);
+      }).length,
+      change: 'Ongoing & Upcoming',
+      icon: Video,
+      color: 'from-amber-500 to-orange-400'
+    },
+    {
+      label: 'Total Sessions',
+      value: analytics?.totalSessions || '—',
+      change: `Comp/Ongoing: ${analytics?.completedSessions || 0} | Upcoming: ${analytics?.upcomingSessions || 0}`,
+      icon: BarChart3,
+      color: 'from-pink-500 to-rose-400'
+    },
   ];
 
   const getRiskBadge = (level) => {
@@ -102,18 +143,22 @@ const AdminDashboard = () => {
 
             {/* Notification Dropdown */}
             <div className="relative">
-              <button
-                onClick={() => {
-                  setShowNotifications(!showNotifications);
-                  setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-                }}
-                className="hidden md:flex p-2.5 rounded-2xl bg-white shadow-soft hover:shadow-soft-lg transition-all relative"
+              <Link
+                to="/admin/messages"
+                className={`hidden md:flex p-2.5 rounded-2xl bg-white shadow-soft transition-all relative ${totalUnreadMessages > 0 ? 'bg-primary-light ring-2 ring-primary ring-offset-2' : 'hover:shadow-soft-lg'}`}
               >
-                <Bell className="w-5 h-5 text-text-secondary" />
-                {unreadCount > 0 && (
-                  <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-danger rounded-full border-2 border-white" />
+                <Bell className={`w-5 h-5 ${totalUnreadMessages > 0 ? 'text-primary' : 'text-text-secondary'}`} />
+                {totalUnreadMessages > 0 && (
+                  <>
+                    <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-danger rounded-full border-2 border-white" />
+                    <motion.span
+                      animate={{ scale: [1, 1.4, 1], opacity: [0.5, 0, 0.5] }}
+                      transition={{ duration: 2, repeat: Infinity }}
+                      className="absolute -top-1 -right-1 w-full h-full rounded-2xl bg-primary opacity-20 pointer-events-none"
+                    />
+                  </>
                 )}
-              </button>
+              </Link>
 
               <AnimatePresence>
                 {showNotifications && (
@@ -200,22 +245,26 @@ const AdminDashboard = () => {
                         // Ongoing = within 10 mins of start OR has started and not yet ended
                         const isOngoing = diff <= 10 && now < endTime && session.status !== 'cancelled';
                         const isPast = ['completed', 'cancelled', 'no-show'].includes(session.status) || now >= endTime;
+                        const isUpcoming = aptDate > now && !isPast && !isOngoing;
 
                         let displayStatus = session.status;
                         if (session.status === 'cancelled') {
                           displayStatus = 'cancelled';
                         } else if (isPast) {
                           displayStatus = session.patientJoined ? 'ended' : 'expired';
+                          if (session.status === 'completed') displayStatus = 'completed';
                         } else if (isOngoing) {
                           displayStatus = 'ongoing';
                         }
 
-                        return { ...session, isOngoing, isPast, displayStatus, aptDate };
+                        return { ...session, isOngoing, isPast, isUpcoming, displayStatus, aptDate };
                       })
-                      .filter((s) => !s.isPast)
                       .sort((a, b) => {
+                        // Ongoing first, then upcoming, then past
                         if (a.isOngoing && !b.isOngoing) return -1;
                         if (!a.isOngoing && b.isOngoing) return 1;
+                        if (a.isUpcoming && b.isPast) return -1;
+                        if (a.isPast && b.isUpcoming) return 1;
                         return a.aptDate - b.aptDate;
                       })
                       .map((session) => (

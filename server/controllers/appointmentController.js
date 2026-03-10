@@ -158,7 +158,7 @@ export const verifyPayment = async (req, res, next) => {
               <p style="color:#666;font-size:14px;">Your appointment has been successfully booked and paid.</p>
               <div style="background:#f0fdf4;border-radius:12px;padding:20px;margin:16px 0;">
                 <table style="width:100%;font-size:14px;color:#333;">
-                  <tr><td style="padding:6px 0;color:#666;">Doctor</td><td style="padding:6px 0;font-weight:bold;">Dr. ${appointment.doctor.name}</td></tr>
+                  <tr><td style="padding:6px 0;color:#666;">Doctor</td><td style="padding:6px 0;font-weight:bold;">${appointment.doctor.name.startsWith('Dr.') ? appointment.doctor.name : `Dr. ${appointment.doctor.name}`}</td></tr>
                   <tr><td style="padding:6px 0;color:#666;">Date</td><td style="padding:6px 0;font-weight:bold;">${dateStr}</td></tr>
                   <tr><td style="padding:6px 0;color:#666;">Time</td><td style="padding:6px 0;font-weight:bold;">${appointment.time}</td></tr>
                   <tr><td style="padding:6px 0;color:#666;">Type</td><td style="padding:6px 0;font-weight:bold;text-transform:capitalize;">${appointment.type}</td></tr>
@@ -174,22 +174,13 @@ export const verifyPayment = async (req, res, next) => {
       console.error('⚠️ Confirmation email failed:', emailErr.message);
     }
 
-    // Send welcome message from doctor to create the conversation
+    // Send welcome/confirmation message from doctor to patient
     const Message = (await import('../models/Message.js')).default;
-    const existingConvo = await Message.findOne({
-      $or: [
-        { sender: appointment.doctor._id, receiver: appointment.patient._id },
-        { sender: appointment.patient._id, receiver: appointment.doctor._id },
-      ],
+    await Message.create({
+      sender: appointment.doctor._id,
+      receiver: appointment.patient._id,
+      text: `Hello ${appointment.patient.name}! Your appointment is confirmed for ${new Date(appointment.date).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })} at ${appointment.time}. You can join the session using this link: ${process.env.CLIENT_URL || ''}${appointment.meetingLink}. See you then! 😊`,
     });
-
-    if (!existingConvo) {
-      await Message.create({
-        sender: appointment.doctor._id,
-        receiver: appointment.patient._id,
-        text: `Hello ${appointment.patient.name}! Your appointment is confirmed for ${new Date(appointment.date).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })} at ${appointment.time}. Feel free to message me if you have any questions before our session. 😊`,
-      });
-    }
 
     res.json({ message: 'Payment verified and appointment confirmed!', appointment });
   } catch (error) {

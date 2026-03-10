@@ -23,6 +23,8 @@ import AdminAnalytics from './pages/admin/Analytics';
 import VideoSession from './pages/VideoSession';
 import VerifyOTP from './pages/VerifyOTP';
 
+import AdminMessages from './pages/admin/Messages';
+
 function App() {
   return (
     <AuthProvider>
@@ -76,6 +78,9 @@ function App() {
           } />
           <Route path="/admin/analytics" element={
             <ProtectedRoute allowedRoles={['doctor', 'admin']}><AdminAnalytics /></ProtectedRoute>
+          } />
+          <Route path="/admin/messages" element={
+            <ProtectedRoute allowedRoles={['doctor', 'admin']}><AdminMessages /></ProtectedRoute>
           } />
 
           {/* Session — accessible by both roles */}

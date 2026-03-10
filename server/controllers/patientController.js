@@ -26,7 +26,7 @@ export const getPatients = async (req, res, next) => {
         .sort({ date: -1 }).limit(1);
 
       const sessionCount = await Appointment.countDocuments({
-        patient: patient._id, doctor: req.user._id, status: 'completed'
+        patient: patient._id, doctor: req.user._id, status: { $ne: 'cancelled' }
       });
 
       const latestNote = await SessionNote.findOne({ patient: patient._id, doctor: req.user._id })
@@ -82,7 +82,8 @@ export const getPatientDetail = async (req, res, next) => {
     const appointments = await Appointment.find({
       patient: req.params.id,
       doctor: req.user._id,
-    }).sort({ date: -1 }).limit(20);
+      status: { $ne: 'cancelled' }
+    }).sort({ date: -1, time: -1 });
 
     const sessionNotes = await SessionNote.find({
       patient: req.params.id,
@@ -92,9 +93,7 @@ export const getPatientDetail = async (req, res, next) => {
     const moodEntries = await MoodEntry.find({ patient: req.params.id })
       .sort({ date: -1 }).limit(30);
 
-    const sessionCount = await Appointment.countDocuments({
-      patient: req.params.id, doctor: req.user._id, status: 'completed'
-    });
+    const sessionCount = appointments.length;
 
     res.json({ patient, appointments, sessionNotes, moodEntries, sessionCount });
   } catch (error) {
@@ -108,65 +107,176 @@ export const getAnalytics = async (req, res, next) => {
   try {
     const doctorId = req.user._id;
 
-    const totalPatients = await Appointment.distinct('patient', { doctor: doctorId });
-    const totalSessions = await Appointment.countDocuments({ doctor: doctorId, status: 'completed' });
+    const totalPatients = await Appointment.distinct('patient', {
+      doctor: doctorId,
+      status: { $nin: ['cancelled'] }
+    });
+    const totalSessions = await Appointment.countDocuments({
+      doctor: doctorId,
+      status: { $nin: ['cancelled'] }
+    });
+
+    const totalRev = await Appointment.aggregate([
+      { $match: { doctor: doctorId, paymentStatus: 'paid' } },
+      { $group: { _id: null, total: { $sum: '$fee' } } }
+    ]);
+
+    // Revenue Breakdown (UTC aligned)
+    const now = new Date();
+    const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), now.getUTCHours(), now.getUTCMinutes()));
+
+    const completedRevenueData = await Appointment.aggregate([
+      {
+        $match: {
+          doctor: doctorId,
+          paymentStatus: 'paid',
+          $or: [
+            { status: 'completed' },
+            { date: { $lt: todayUTC } }
+          ]
+        }
+      },
+      { $group: { _id: null, total: { $sum: '$fee' } } }
+    ]);
+
+    const pendingRevenueData = await Appointment.aggregate([
+      {
+        $match: {
+          doctor: doctorId,
+          paymentStatus: 'paid',
+          status: { $nin: ['completed', 'cancelled'] },
+          date: { $gte: todayUTC }
+        }
+      },
+      { $group: { _id: null, total: { $sum: '$fee' } } }
+    ]);
+
+    // Revenue Today (UTC aligned for standard Date storage)
+    const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const todayEnd = new Date(todayStart);
+    todayEnd.setUTCDate(todayEnd.getUTCDate() + 1);
+
+    const completedRevTodayData = await Appointment.aggregate([
+      {
+        $match: {
+          doctor: doctorId,
+          paymentStatus: 'paid',
+          date: { $gte: todayStart, $lt: todayEnd },
+          $or: [
+            { status: 'completed' },
+            { date: { $lt: todayUTC } }
+          ]
+        }
+      },
+      { $group: { _id: null, total: { $sum: '$fee' } } }
+    ]);
+
+    const pendingRevTodayData = await Appointment.aggregate([
+      {
+        $match: {
+          doctor: doctorId,
+          paymentStatus: 'paid',
+          date: { $gte: todayStart, $lt: todayEnd },
+          status: { $nin: ['completed', 'cancelled'] },
+          date: { $gte: todayUTC }
+        }
+      },
+      { $group: { _id: null, total: { $sum: '$fee' } } }
+    ]);
+
+    const revToday = await Appointment.aggregate([
+      {
+        $match: {
+          doctor: doctorId,
+          paymentStatus: 'paid',
+          date: { $gte: todayStart, $lt: todayEnd }
+        }
+      },
+      { $group: { _id: null, total: { $sum: '$fee' } } }
+    ]);
+
+    const completedSessionsCount = await Appointment.countDocuments({
+      doctor: doctorId,
+      status: { $nin: ['cancelled'] },
+      $or: [
+        { status: 'completed' },
+        { date: { $lt: todayEnd } }
+      ]
+    });
+
+    const upcomingSessionsCount = await Appointment.countDocuments({
+      doctor: doctorId,
+      status: { $nin: ['completed', 'cancelled'] },
+      date: { $gte: todayEnd }
+    });
+
+    // Daily Data (last 7 days for the new chart)
+    const dailyData = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(todayStart);
+      d.setUTCDate(d.getUTCDate() - i);
+      const nD = new Date(d);
+      nD.setUTCDate(nD.getUTCDate() + 1);
+
+      const dayRev = await Appointment.aggregate([
+        { $match: { doctor: doctorId, paymentStatus: 'paid', date: { $gte: d, $lt: nD } } },
+        { $group: { _id: null, total: { $sum: '$fee' } } }
+      ]);
+      const dayOrders = await Appointment.countDocuments({
+        doctor: doctorId, status: { $nin: ['cancelled'] }, date: { $gte: d, $lt: nD }
+      });
+
+      dailyData.push({
+        date: d.toLocaleDateString('en', { weekday: 'short', day: 'numeric' }),
+        revenue: dayRev[0]?.total || 0,
+        orders: dayOrders,
+      });
+    }
 
     // Monthly data (last 7 months)
     const monthlyData = [];
     for (let i = 6; i >= 0; i--) {
-      const start = new Date();
-      start.setMonth(start.getMonth() - i, 1);
-      start.setHours(0, 0, 0, 0);
-      const end = new Date(start);
-      end.setMonth(end.getMonth() + 1);
+      const startM = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
+      const endM = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i + 1, 1));
 
       const sessions = await Appointment.countDocuments({
-        doctor: doctorId, status: 'completed',
-        date: { $gte: start, $lt: end },
+        doctor: doctorId,
+        status: { $nin: ['cancelled'] },
+        date: { $gte: startM, $lt: endM },
       });
 
-      const revenue = await Appointment.aggregate([
-        { $match: { doctor: doctorId, status: 'completed', date: { $gte: start, $lt: end } } },
+      const revenueMonth = await Appointment.aggregate([
+        { $match: { doctor: doctorId, paymentStatus: 'paid', date: { $gte: startM, $lt: endM } } },
         { $group: { _id: null, total: { $sum: '$fee' } } }
       ]);
 
-      const patients = await Appointment.distinct('patient', {
-        doctor: doctorId, date: { $gte: start, $lt: end },
+      const patientsMonth = await Appointment.distinct('patient', {
+        doctor: doctorId,
+        status: { $nin: ['cancelled'] },
+        date: { $gte: startM, $lt: endM },
       });
 
       monthlyData.push({
-        month: start.toLocaleDateString('en', { month: 'short' }),
+        month: startM.toLocaleDateString('en', { month: 'short' }),
         sessions,
-        revenue: revenue[0]?.total || 0,
-        patients: patients.length,
+        revenue: revenueMonth[0]?.total || 0,
+        patients: patientsMonth.length,
       });
     }
-
-    // Conditions breakdown from session notes
-    const notes = await SessionNote.find({ doctor: doctorId, diagnosis: { $ne: '' } });
-    const conditionsMap = {};
-    notes.forEach(n => {
-      n.diagnosis.split(',').forEach(d => {
-        const cond = d.trim();
-        if (cond) conditionsMap[cond] = (conditionsMap[cond] || 0) + 1;
-      });
-    });
-    const conditions = Object.entries(conditionsMap)
-      .map(([name, count]) => ({ name, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 6);
-
-    const totalRev = await Appointment.aggregate([
-      { $match: { doctor: doctorId, status: 'completed' } },
-      { $group: { _id: null, total: { $sum: '$fee' } } }
-    ]);
 
     res.json({
       totalPatients: totalPatients.length,
       totalSessions,
       totalRevenue: totalRev[0]?.total || 0,
+      completedRevenue: completedRevenueData[0]?.total || 0,
+      pendingRevenue: pendingRevenueData[0]?.total || 0,
+      totalRevenueToday: revToday[0]?.total || 0,
+      completedRevenueToday: completedRevTodayData[0]?.total || 0,
+      pendingRevenueToday: pendingRevTodayData[0]?.total || 0,
+      completedSessions: completedSessionsCount,
+      upcomingSessions: upcomingSessionsCount,
+      dailyData,
       monthlyData,
-      conditions,
     });
   } catch (error) {
     next(error);

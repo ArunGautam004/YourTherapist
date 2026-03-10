@@ -5,7 +5,7 @@ import {
   TrendingUp, AlertTriangle
 } from 'lucide-react';
 import Sidebar from '../../components/layout/Sidebar';
-import { patientAPI } from '../../services/api';
+import { patientAPI, messageAPI } from '../../services/api';
 
 const adminLinks = [
   { name: 'Dashboard', path: '/admin/dashboard', icon: LayoutDashboard },
@@ -19,12 +19,18 @@ const adminLinks = [
 const AdminAnalytics = () => {
   const [analytics, setAnalytics] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [totalUnread, setTotalUnread] = useState(0);
 
   useEffect(() => {
     const fetchAnalytics = async () => {
       try {
-        const { data } = await patientAPI.getAnalytics();
+        const [{ data }, { data: msgData }] = await Promise.all([
+          patientAPI.getAnalytics(),
+          messageAPI.getConversations().catch(() => ({ data: { conversations: [] } }))
+        ]);
         setAnalytics(data);
+        const unread = (msgData.conversations || []).reduce((sum, c) => sum + (c.unreadCount || 0), 0);
+        setTotalUnread(unread);
       } catch (err) {
         console.error(err);
       } finally {
@@ -34,10 +40,19 @@ const AdminAnalytics = () => {
     fetchAnalytics();
   }, []);
 
+  const dynamicLinks = [
+    { name: 'Dashboard', path: '/admin/dashboard', icon: LayoutDashboard },
+    { name: 'Patients', path: '/admin/patients', icon: Users },
+    { name: 'Calendar', path: '/admin/calendar', icon: Calendar },
+    { name: 'Analytics', path: '/admin/analytics', icon: BarChart3 },
+    { name: 'Messages', path: '/admin/messages', icon: MessageCircle, badge: totalUnread > 0 ? totalUnread.toString() : null },
+    { name: 'Settings', path: '/admin/settings', icon: Settings },
+  ];
+
   if (loading) {
     return (
       <div className="min-h-screen bg-background">
-        <Sidebar links={adminLinks} userRole="admin" />
+        <Sidebar links={dynamicLinks} userRole="admin" />
         <main className="lg:ml-[260px] pt-20 lg:pt-6 p-4 md:p-6 lg:p-8">
           <div className="flex items-center justify-center py-20">
             <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin" />
@@ -47,18 +62,35 @@ const AdminAnalytics = () => {
     );
   }
 
-  const metrics = [
+  const stats = [
     { label: 'Total Patients', value: analytics?.totalPatients || '—', icon: Users, color: 'from-primary to-emerald-400' },
-    { label: 'Total Sessions', value: analytics?.totalSessions || '—', icon: BarChart3, color: 'from-secondary to-purple-400' },
-    { label: 'Revenue', value: analytics?.totalRevenue ? `₹${analytics.totalRevenue.toLocaleString()}` : '—', icon: TrendingUp, color: 'from-amber-500 to-orange-400' },
-    { label: 'Avg per Month', value: analytics?.monthlyData?.length ? Math.round(analytics.monthlyData.reduce((s, m) => s + m.sessions, 0) / analytics.monthlyData.length) : '—', icon: Calendar, color: 'from-pink-500 to-rose-400' },
+    {
+      label: 'Total Sessions',
+      value: analytics?.totalSessions || '—',
+      detail: `Comp/Ongoing: ${analytics?.completedSessions || 0} | Upcoming: ${analytics?.upcomingSessions || 0}`,
+      icon: BarChart3,
+      color: 'from-secondary to-purple-400'
+    },
+    {
+      label: 'Total Revenue',
+      value: analytics?.totalRevenue ? `₹${analytics.totalRevenue >= 100000 ? (analytics.totalRevenue / 100000).toFixed(1) + 'L' : analytics.totalRevenue >= 1000 ? (analytics.totalRevenue / 1000).toFixed(1) + 'K' : analytics.totalRevenue}` : '—',
+      detail: `Comp: ₹${analytics?.completedRevenue?.toLocaleString() || 0} | Pend: ₹${analytics?.pendingRevenue?.toLocaleString() || 0}`,
+      icon: TrendingUp,
+      color: 'from-amber-500 to-orange-400'
+    },
+    {
+      label: 'Revenue Today',
+      value: analytics?.totalRevenueToday ? `₹${analytics.totalRevenueToday.toLocaleString()}` : '₹0',
+      icon: Calendar,
+      color: 'from-pink-500 to-rose-400'
+    },
   ];
 
   const maxSessions = analytics?.monthlyData ? Math.max(...analytics.monthlyData.map(m => m.sessions), 1) : 1;
 
   return (
     <div className="min-h-screen bg-background">
-      <Sidebar links={adminLinks} userRole="admin" />
+      <Sidebar links={dynamicLinks} userRole="admin" />
 
       <main className="lg:ml-[260px] pt-20 lg:pt-6 p-4 md:p-6 lg:p-8">
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="max-w-7xl mx-auto">
@@ -69,13 +101,20 @@ const AdminAnalytics = () => {
 
           {/* Metric Cards */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-            {metrics.map((metric) => (
+            {stats.map((metric) => (
               <div key={metric.label} className="card group hover:-translate-y-1">
                 <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br ${metric.color} flex items-center justify-center shadow-soft mb-3`}>
                   <metric.icon className="w-6 h-6 text-white" />
                 </div>
                 <p className="text-2xl font-display font-bold text-text-primary">{metric.value}</p>
-                <p className="text-xs text-text-secondary">{metric.label}</p>
+                <div className="flex items-center justify-between mt-1">
+                  <p className="text-xs text-text-secondary">{metric.label}</p>
+                  {metric.detail && (
+                    <span className="text-[10px] font-medium text-success opacity-90 px-1.5 py-0.5 rounded-full bg-success/10 border border-success/20">
+                      {metric.detail}
+                    </span>
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -97,30 +136,29 @@ const AdminAnalytics = () => {
               </div>
             </div>
 
-            {/* Conditions Breakdown */}
+            {/* Daily Orders & Revenue Chart */}
             <div className="lg:col-span-2 card">
-              <h2 className="font-display font-bold text-lg text-text-primary mb-5">Top Conditions</h2>
-              {(analytics?.conditions || []).length > 0 ? (
-                <div className="space-y-4">
-                  {analytics.conditions.slice(0, 5).map((cond, i) => {
-                    const maxCount = analytics.conditions[0]?.count || 1;
-                    const pct = Math.round((cond.count / maxCount) * 100);
-                    const colors = ['bg-primary', 'bg-secondary', 'bg-accent', 'bg-warning', 'bg-danger'];
+              <h2 className="font-display font-bold text-lg text-text-primary mb-5">Daily Revenue</h2>
+              {(analytics?.dailyData || []).length > 0 ? (
+                <div className="flex items-end justify-between h-48 gap-2 mt-4 pb-6">
+                  {analytics.dailyData.map((day, i) => {
+                    const maxDailyRev = Math.max(...analytics.dailyData.map(d => d.revenue), 1);
+                    const height = (day.revenue / maxDailyRev) * 120;
                     return (
-                      <div key={i}>
-                        <div className="flex items-center justify-between text-sm mb-1">
-                          <span className="text-text-primary font-medium">{cond.name}</span>
-                          <span className="text-text-secondary text-xs">{cond.count} patients</span>
+                      <div key={i} className="flex-1 flex flex-col items-center gap-2 group relative">
+                        <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none">
+                          ₹{day.revenue.toLocaleString()} • {day.orders} orders
                         </div>
-                        <div className="h-3 rounded-full bg-gray-100 overflow-hidden">
-                          <div className={`h-full rounded-full ${colors[i % colors.length]} transition-all duration-700`} style={{ width: `${pct}%` }} />
-                        </div>
+                        <div className="w-full max-w-[32px] bg-gradient-to-t from-secondary to-purple-400 rounded-t-lg transition-all duration-500 hover:brightness-110 cursor-help"
+                          style={{ height: `${height}px`, minHeight: '4px' }}
+                        />
+                        <span className="text-[10px] text-text-secondary font-medium mt-1 whitespace-nowrap">{day.date.split(',')[0]}</span>
                       </div>
                     );
                   })}
                 </div>
               ) : (
-                <p className="text-sm text-text-secondary text-center py-6">No condition data yet</p>
+                <p className="text-sm text-text-secondary text-center py-12">No daily data available</p>
               )}
             </div>
           </div>

@@ -45,9 +45,9 @@ export const startReminderJob = () => {
                   <div style="background:white;border-radius:12px;padding:24px;text-align:center;">
                     <p style="font-size:48px;margin:0;">⏰</p>
                     <h2 style="color:#333;margin:12px 0 8px;">Session Starting Soon!</h2>
-                    <p style="color:#666;font-size:14px;">Hello <strong>${apt.patient.name}</strong>, your session with <strong>Dr. ${apt.doctor.name}</strong> starts in 5 minutes.</p>
+                    <p style="color:#666;font-size:14px;">Hello <strong>${apt.patient.name}</strong>, your session with <strong>${apt.doctor.name.startsWith('Dr.') ? apt.doctor.name : `Dr. ${apt.doctor.name}`}</strong> starts in 5 minutes.</p>
                     <div style="margin:20px 0;">
-                      <a href="${process.env.CLIENT_URL}${apt.meetingLink}" style="display:inline-block;background:#0d6b5e;color:white;padding:14px 28px;border-radius:12px;text-decoration:none;font-weight:bold;font-size:14px;">
+                      <a href="${process.env.CLIENT_URL}/patient/session/${apt.meetingLink.split('/').pop()}" style="display:inline-block;background:#0d6b5e;color:white;padding:14px 28px;border-radius:12px;text-decoration:none;font-weight:bold;font-size:14px;">
                         Join Session →
                       </a>
                     </div>
@@ -56,9 +56,17 @@ export const startReminderJob = () => {
                 </div>
               `,
             });
+            // Also send an internal chat message as a reminder
+            const Message = (await import('../models/Message.js')).default;
+            await Message.create({
+              sender: apt.doctor._id,
+              receiver: apt.patient._id,
+              text: `🔔 Reminder: Our session is starting in 5 minutes! You can join here: ${process.env.CLIENT_URL || ''}${apt.meetingLink}`,
+            });
+
             apt.reminderSent = true;
             await apt.save();
-            console.log(`⏰ Reminder sent to ${apt.patient.email} for appointment at ${apt.time}`);
+            console.log(`⏰ Reminder sent to ${apt.patient.email} and internal chat for appointment at ${apt.time}`);
           } catch (emailErr) {
             console.error(`⚠️ Reminder email failed for ${apt.patient.email}:`, emailErr.message);
           }
