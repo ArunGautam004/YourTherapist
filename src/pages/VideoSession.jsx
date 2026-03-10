@@ -56,6 +56,7 @@ const VideoSession = () => {
   const remoteVideoRef = useRef(null);
   const peerConnection = useRef(null);
   const localStream = useRef(null);
+  const pendingCandidates = useRef([]);
 
   // Custom waiting room check
   useEffect(() => {
@@ -158,6 +159,10 @@ const VideoSession = () => {
       // Patient receives offer, creates answer
       try {
         await peerConnection.current.setRemoteDescription(new RTCSessionDescription(offer));
+        // Process any candidates that arrived before the description was set
+        pendingCandidates.current.forEach(c => peerConnection.current.addIceCandidate(new RTCIceCandidate(c)));
+        pendingCandidates.current = [];
+
         const answer = await peerConnection.current.createAnswer();
         await peerConnection.current.setLocalDescription(answer);
         socket.emit('call:answer', { roomId, answer });
@@ -170,6 +175,8 @@ const VideoSession = () => {
       // Doctor receives answer
       try {
         await peerConnection.current.setRemoteDescription(new RTCSessionDescription(answer));
+        pendingCandidates.current.forEach(c => peerConnection.current.addIceCandidate(new RTCIceCandidate(c)));
+        pendingCandidates.current = [];
       } catch (err) {
         console.error('Error handling answer:', err);
       }
@@ -177,7 +184,11 @@ const VideoSession = () => {
 
     const handleIceCandidate = async ({ candidate }) => {
       try {
-        await peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
+        if (peerConnection.current.remoteDescription) {
+          await peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
+        } else {
+          pendingCandidates.current.push(candidate);
+        }
       } catch (err) {
         console.error('Error adding ICE candidate:', err);
       }
@@ -320,7 +331,7 @@ const VideoSession = () => {
             {(!videoOn) && (
               <div className="absolute inset-0 flex items-center justify-center bg-gray-800">
                 <div className="w-24 h-24 rounded-full bg-primary/20 flex items-center justify-center">
-                  <span className="text-5xl">{user?.role === 'doctor' ? '👩‍⚕️' : '👤'}</span>
+                  <span className="text-5xl">{user?.role === 'doctor' || user?.role === 'admin' ? '👩‍⚕️' : '👤'}</span>
                 </div>
               </div>
             )}
@@ -350,7 +361,14 @@ const VideoSession = () => {
           </div>
 
           <h2 className="font-display text-2xl font-bold text-white mb-2">Waiting Room</h2>
-          <p className="text-gray-400 mb-2">Your session with <span className="text-white font-medium">{appointment?.doctor?.name || 'Doctor'}</span></p>
+          <p className="text-gray-400 mb-2">
+            Your session with{' '}
+            <span className="text-white font-medium">
+              {(user?.role === 'doctor' || user?.role === 'admin')
+                ? (appointment?.patient?.name || 'Patient')
+                : (appointment?.doctor?.name || 'Doctor')}
+            </span>
+          </p>
 
           <div className="flex items-center justify-center gap-2 text-primary-300 mb-8">
             <Clock className="w-4 h-4 animate-pulse" />
