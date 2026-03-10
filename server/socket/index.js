@@ -49,17 +49,48 @@ const initSocket = (io) => {
     });
 
     // ====== VIDEO CALL SIGNALING ======
-    socket.on('call:join-room', (roomId) => {
-      socket.join(roomId);
-      const room = io.sockets.adapter.rooms.get(roomId);
-      const numClients = room ? room.size : 0;
-      console.log(`📹 User joined room ${roomId} (${numClients} in room)`);
+    // Store who is in which room and their role
+    const roomsMap = new Map();
 
-      if (numClients === 1) {
-        socket.emit('call:waiting');
-      } else if (numClients === 2) {
+    socket.on('call:join-room', ({ roomId, role }) => {
+      socket.join(roomId);
+
+      if (!roomsMap.has(roomId)) {
+        roomsMap.set(roomId, { doctorId: null, patientId: null });
+      }
+
+      const room = roomsMap.get(roomId);
+      const isDoc = role === 'doctor' || role === 'admin';
+
+      if (isDoc) {
+        room.doctorId = socket.id;
+        // Notify anyone in the waiting room that the doctor has arrived
+        io.to(`${roomId}-waiting`).emit('call:room-status', { hasDoctor: true });
+      } else {
+        room.patientId = socket.id;
+      }
+
+      console.log(`📹 User joined room ${roomId} (Role: ${role})`);
+
+      // If patient joins and doctor isn't there yet
+      if (!isDoc && !room.doctorId) {
+        socket.emit('call:waiting-for-doctor');
+      }
+      // If doctor joins and patient is already there
+      else if (isDoc && room.patientId) {
         io.to(roomId).emit('call:ready');
       }
+      // If patient joins and doctor is already there
+      else if (!isDoc && room.doctorId) {
+        io.to(roomId).emit('call:ready');
+      }
+    });
+
+    // For users waiting in the waiting room UI
+    socket.on('call:check-room', (roomId) => {
+      socket.join(`${roomId}-waiting`);
+      const room = roomsMap.get(roomId);
+      socket.emit('call:room-status', { hasDoctor: !!(room && room.doctorId) });
     });
 
     socket.on('call:offer', ({ roomId, offer }) => {
@@ -77,6 +108,15 @@ const initSocket = (io) => {
     socket.on('call:end', (roomId) => {
       socket.to(roomId).emit('call:ended');
       socket.leave(roomId);
+      const room = roomsMap.get(roomId);
+      if (room) {
+        if (room.doctorId === socket.id) {
+          room.doctorId = null;
+          io.to(`${roomId}-waiting`).emit('call:room-status', { hasDoctor: false });
+        }
+        if (room.patientId === socket.id) room.patientId = null;
+        if (!room.doctorId && !room.patientId) roomsMap.delete(roomId);
+      }
     });
 
     // ====== LIVE QUESTIONNAIRE ======
@@ -92,6 +132,21 @@ const initSocket = (io) => {
 
     // ====== DISCONNECT ======
     socket.on('disconnect', () => {
+      // Clean up roomsMap
+      for (const [roomId, room] of roomsMap.entries()) {
+        let changed = false;
+        if (room.doctorId === socket.id) {
+          room.doctorId = null;
+          changed = true;
+          io.to(`${roomId}-waiting`).emit('call:room-status', { hasDoctor: false });
+        }
+        if (room.patientId === socket.id) { room.patientId = null; changed = true; }
+        if (changed) {
+          socket.to(roomId).emit('call:ended');
+        }
+        if (!room.doctorId && !room.patientId) roomsMap.delete(roomId);
+      }
+
       // Remove from online users
       for (const [userId, sockId] of onlineUsers.entries()) {
         if (sockId === socket.id) {

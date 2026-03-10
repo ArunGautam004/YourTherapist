@@ -32,6 +32,7 @@ const VideoSession = () => {
 
   const [isInWaitingRoom, setIsInWaitingRoom] = useState(true);
   const [sessionActive, setSessionActive] = useState(false);
+  const [isDoctorPresent, setIsDoctorPresent] = useState(user?.role === 'doctor' || user?.role === 'admin');
   const [micOn, setMicOn] = useState(true);
   const [videoOn, setVideoOn] = useState(true);
   const [showChat, setShowChat] = useState(false);
@@ -108,6 +109,25 @@ const VideoSession = () => {
       localStream.current.getVideoTracks().forEach(track => { track.enabled = videoOn; });
     }
   }, [micOn, videoOn]);
+
+  // Status check for Patient in Waiting Room
+  useEffect(() => {
+    if (user?.role !== 'patient' || sessionActive) return;
+
+    const socket = getSocket();
+    if (!socket) return;
+
+    const handleRoomStatus = ({ hasDoctor }) => {
+      setIsDoctorPresent(hasDoctor);
+    };
+
+    socket.emit('call:check-room', roomId);
+    socket.on('call:room-status', handleRoomStatus);
+
+    return () => {
+      socket.off('call:room-status', handleRoomStatus);
+    };
+  }, [roomId, user, sessionActive]);
 
   // Main WebRTC & Socket logic when session is active
   useEffect(() => {
@@ -221,7 +241,13 @@ const VideoSession = () => {
     };
 
     // Register all socket listeners
-    socket.on('call:ready', handleCallReady);
+    socket.on('call:ready', () => {
+      setIsDoctorPresent(true);
+      handleCallReady();
+    });
+    socket.on('call:waiting-for-doctor', () => {
+      setIsDoctorPresent(false);
+    });
     socket.on('call:offer', handleCallOffer);
     socket.on('call:answer', handleCallAnswer);
     socket.on('call:ice-candidate', handleIceCandidate);
@@ -233,11 +259,12 @@ const VideoSession = () => {
     socket.on('questionnaire:response', handleQuestionnaireResponse);
 
     // Join the room
-    socket.emit('call:join-room', roomId);
+    socket.emit('call:join-room', { roomId, role: user?.role });
 
     return () => {
       // Cleanup
       socket.off('call:ready', handleCallReady);
+      socket.off('call:waiting-for-doctor');
       socket.off('call:offer', handleCallOffer);
       socket.off('call:answer', handleCallAnswer);
       socket.off('call:ice-candidate', handleIceCandidate);
@@ -377,9 +404,17 @@ const VideoSession = () => {
 
           <button
             onClick={handleJoinSession}
-            className="bg-gradient-to-r from-primary to-primary-dark text-white font-semibold px-10 py-4 rounded-2xl hover:shadow-glow-lg transition-all duration-300 active:scale-[0.98]"
+            disabled={!isDoctorPresent && user?.role === 'patient'}
+            className={`font-semibold px-10 py-4 rounded-2xl transition-all duration-300 w-full sm:w-auto ${(!isDoctorPresent && user?.role === 'patient') ? 'bg-gray-700 text-gray-400 cursor-not-allowed' : 'bg-gradient-to-r from-primary to-primary-dark text-white hover:shadow-glow-lg active:scale-[0.98]'}`}
           >
-            Join Session
+            {(!isDoctorPresent && user?.role === 'patient') ? (
+              <span className="flex items-center justify-center gap-2">
+                <Loader2 className="w-5 h-5 animate-spin" />
+                Waiting for Doctor to join...
+              </span>
+            ) : (
+              'Join Session'
+            )}
           </button>
         </motion.div>
       </div>
