@@ -240,7 +240,7 @@ export const getAppointment = async (req, res, next) => {
     if (!appointment) return res.status(404).json({ message: 'Appointment not found' });
 
     const isOwner = appointment.patient._id.toString() === req.user._id.toString() ||
-                    appointment.doctor._id.toString() === req.user._id.toString();
+      appointment.doctor._id.toString() === req.user._id.toString();
     if (!isOwner) return res.status(403).json({ message: 'Not authorized' });
 
     res.json({ appointment });
@@ -331,7 +331,6 @@ export const getAvailableSlots = async (req, res, next) => {
       doctor: doctorId,
       date: { $gte: dayStart, $lt: dayEnd },
       status: { $nin: ['cancelled', 'no-show'] },
-      paymentStatus: 'paid',
     }).select('time');
 
     const bookedTimes = booked.map(a => a.time);

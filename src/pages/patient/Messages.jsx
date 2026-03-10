@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
   LayoutDashboard, Calendar, BookOpen, MessageCircle, Settings,
-  Send, Phone, Video, Search, Loader2, ArrowLeft
+  Send, Phone, Video, Search, Loader2, ArrowLeft, Clock
 } from 'lucide-react';
 import Sidebar from '../../components/layout/Sidebar';
 import { useAuth } from '../../context/AuthContext';
@@ -11,6 +11,7 @@ import { getSocket } from '../../services/socket';
 
 const patientLinks = [
   { name: 'Dashboard', path: '/patient/dashboard', icon: LayoutDashboard },
+  { name: 'My Sessions', path: '/patient/sessions', icon: Clock },
   { name: 'Book Appointment', path: '/patient/book', icon: Calendar },
   { name: 'Mood Journal', path: '/patient/journal', icon: BookOpen },
   { name: 'Messages', path: '/patient/messages', icon: MessageCircle },
@@ -50,9 +51,9 @@ const PatientMessages = () => {
       try {
         const { data } = await messageAPI.getMessages(activeConvo.partner._id);
         setMessages(data.messages || []);
-        
+
         // Clear unread count for the active conversation locally
-        setConversations(prev => prev.map(c => 
+        setConversations(prev => prev.map(c =>
           c.partner._id === activeConvo.partner._id ? { ...c, unreadCount: 0 } : c
         ));
       } catch (err) {
@@ -168,7 +169,7 @@ const PatientMessages = () => {
                     {/* Chat Header */}
                     <div className="flex items-center justify-between p-4 border-b border-gray-100">
                       <div className="flex items-center gap-3">
-                        <button 
+                        <button
                           onClick={() => setActiveConvo(null)}
                           className="md:hidden p-2 -ml-2 rounded-xl hover:bg-gray-100 text-text-secondary transition-colors"
                         >
@@ -192,11 +193,10 @@ const PatientMessages = () => {
                         const isOwn = msg.sender === user?._id || msg.sender?._id === user?._id;
                         return (
                           <div key={msg._id || i} className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}>
-                            <div className={`max-w-[70%] p-3 rounded-2xl text-sm ${
-                              isOwn
-                                ? 'bg-primary text-white rounded-br-md'
-                                : 'bg-gray-100 text-text-primary rounded-bl-md'
-                            }`}>
+                            <div className={`max-w-[70%] p-3 rounded-2xl text-sm ${isOwn
+                              ? 'bg-primary text-white rounded-br-md'
+                              : 'bg-gray-100 text-text-primary rounded-bl-md'
+                              }`}>
                               <p>{msg.text}</p>
                               <p className={`text-xs mt-1 ${isOwn ? 'text-white/50' : 'text-text-secondary'}`}>
                                 {new Date(msg.createdAt).toLocaleTimeString('en', { hour: 'numeric', minute: '2-digit' })}

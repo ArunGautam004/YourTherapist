@@ -13,6 +13,7 @@ import TermsOfService from './pages/TermsOfService';
 import ForgotPassword from './pages/ForgotPassword';
 import PatientDashboard from './pages/patient/Dashboard';
 import BookAppointment from './pages/patient/BookAppointment';
+import PatientSessions from './pages/patient/Sessions';
 import MoodJournal from './pages/patient/MoodJournal';
 import PatientMessages from './pages/patient/Messages';
 import AdminDashboard from './pages/admin/Dashboard';
@@ -49,6 +50,9 @@ function App() {
           {/* Patient Routes */}
           <Route path="/patient/dashboard" element={
             <ProtectedRoute allowedRoles={['patient']}><PatientDashboard /></ProtectedRoute>
+          } />
+          <Route path="/patient/sessions" element={
+            <ProtectedRoute allowedRoles={['patient']}><PatientSessions /></ProtectedRoute>
           } />
           <Route path="/patient/book" element={
             <ProtectedRoute allowedRoles={['patient']}><BookAppointment /></ProtectedRoute>

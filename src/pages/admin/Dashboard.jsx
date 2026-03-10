@@ -175,21 +175,50 @@ const AdminDashboard = () => {
                 </div>
                 {todaySessions.length > 0 ? (
                   <div className="space-y-2">
-                    {todaySessions.map((session) => {
-                      const aptDate = new Date(session.date);
-                      const [tPart, tPeriod] = (session.time || '').split(' ');
-                      let [tH, tM] = (tPart || '0:0').split(':').map(Number);
-                      if (tPeriod === 'PM' && tH !== 12) tH += 12;
-                      if (tPeriod === 'AM' && tH === 12) tH = 0;
-                      aptDate.setHours(tH, tM || 0, 0, 0);
-                      const now = new Date();
-                      const diff = (aptDate - now) / 60000;
-                      const isExpired = diff <= -(session.duration || 50);
-                      const isJoinable = diff <= 15 && !isExpired;
+                    {todaySessions
+                      .map((session) => {
+                        let aptDate = new Date();
+                        if (session.date) {
+                          const safeDate = new Date(session.date);
+                          if (!isNaN(safeDate)) {
+                            const localY = safeDate.getFullYear();
+                            const localM = safeDate.getMonth();
+                            const localD = safeDate.getDate();
 
-                      const displayStatus = isExpired && session.status === 'scheduled' ? 'expired' : session.status;
+                            const [tPart, tPeriod] = (session.time || '').split(' ');
+                            let [tH, tM] = (tPart || '0:0').split(':').map(Number);
+                            if (tPeriod === 'PM' && tH !== 12) tH += 12;
+                            if (tPeriod === 'AM' && tH === 12) tH = 0;
 
-                      return (
+                            aptDate = new Date(localY, localM, localD, tH, tM || 0, 0, 0);
+                          }
+                        }
+                        const endTime = new Date(aptDate.getTime() + (session.duration || 50) * 60000);
+                        const now = new Date();
+                        const diff = (aptDate - now) / 60000;
+
+                        // Ongoing = within 10 mins of start OR has started and not yet ended
+                        const isOngoing = diff <= 10 && now < endTime && session.status !== 'cancelled';
+                        const isPast = ['completed', 'cancelled', 'no-show'].includes(session.status) || now >= endTime;
+
+                        let displayStatus = session.status;
+                        if (session.status === 'cancelled') {
+                          displayStatus = 'cancelled';
+                        } else if (isPast) {
+                          displayStatus = session.patientJoined ? 'ended' : 'expired';
+                        } else if (isOngoing) {
+                          displayStatus = 'ongoing';
+                        }
+
+                        return { ...session, isOngoing, isPast, displayStatus, aptDate };
+                      })
+                      .filter((s) => !s.isPast)
+                      .sort((a, b) => {
+                        if (a.isOngoing && !b.isOngoing) return -1;
+                        if (!a.isOngoing && b.isOngoing) return 1;
+                        return a.aptDate - b.aptDate;
+                      })
+                      .map((session) => (
                         <div key={session._id} className="flex items-center gap-3 p-3 rounded-2xl hover:bg-gray-50 transition-colors">
                           <div className="w-10 h-10 rounded-xl bg-primary-light flex items-center justify-center text-xl flex-shrink-0">
                             👤
@@ -200,17 +229,21 @@ const AdminDashboard = () => {
                               <Clock className="w-3 h-3" /> {session.time} • {session.duration || 50} min
                             </p>
                           </div>
-                          <span className={`text-xs px-2.5 py-1 rounded-full font-medium capitalize ${displayStatus === 'expired' ? 'bg-gray-100 text-text-secondary' : getStatusBadge(session.status)}`}>
-                            {displayStatus}
-                          </span>
-                          {session.meetingLink && isJoinable && (session.status === 'upcoming' || session.status === 'scheduled') && (
+                          {session.displayStatus !== 'ongoing' && (
+                            <span className={`text-xs px-2.5 py-1 rounded-full font-medium capitalize ${session.displayStatus === 'expired' ? 'bg-gray-100 text-text-secondary' :
+                              session.displayStatus === 'ended' ? 'bg-success/10 text-success' :
+                                getStatusBadge(session.status)
+                              }`}>
+                              {session.displayStatus}
+                            </span>
+                          )}
+                          {session.meetingLink && session.isOngoing && (
                             <Link to={session.meetingLink || '#'} className="btn-primary !px-3 !py-1.5 text-xs flex items-center gap-1">
                               <Video className="w-3.5 h-3.5" /> Start
                             </Link>
                           )}
                         </div>
-                      )
-                    })}
+                      ))}
                   </div>
                 ) : (
                   <p className="text-center py-8 text-text-secondary text-sm">No sessions scheduled for today</p>

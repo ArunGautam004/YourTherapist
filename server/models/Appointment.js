@@ -18,6 +18,7 @@ const appointmentSchema = new mongoose.Schema({
   notes: { type: String, default: '' },
   cancelReason: { type: String, default: '' },
   reminderSent: { type: Boolean, default: false },
+  patientJoined: { type: Boolean, default: false },
 }, { timestamps: true });
 
 appointmentSchema.index({ patient: 1, date: -1 });

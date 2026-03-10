@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   LayoutDashboard, Calendar, BookOpen, MessageCircle, Settings,
-  Plus, Trash2
+  Plus, Trash2, Clock
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Sidebar from '../../components/layout/Sidebar';
@@ -10,6 +10,7 @@ import { moodAPI } from '../../services/api';
 
 const patientLinks = [
   { name: 'Dashboard', path: '/patient/dashboard', icon: LayoutDashboard },
+  { name: 'My Sessions', path: '/patient/sessions', icon: Clock },
   { name: 'Book Appointment', path: '/patient/book', icon: Calendar },
   { name: 'Mood Journal', path: '/patient/journal', icon: BookOpen },
   { name: 'Messages', path: '/patient/messages', icon: MessageCircle, badge: '3' },

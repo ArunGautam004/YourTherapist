@@ -12,6 +12,7 @@ import { appointmentAPI, doctorAPI } from '../../services/api';
 
 const patientLinks = [
   { name: 'Dashboard', path: '/patient/dashboard', icon: LayoutDashboard },
+  { name: 'My Sessions', path: '/patient/sessions', icon: Clock },
   { name: 'Book Appointment', path: '/patient/book', icon: Calendar },
   { name: 'Mood Journal', path: '/patient/journal', icon: BookOpen },
   { name: 'Messages', path: '/patient/messages', icon: MessageCircle },
@@ -193,11 +194,10 @@ const BookAppointment = () => {
           <div className="flex items-center justify-center gap-3 mb-8">
             {['Doctor', 'Date & Time', 'Session Type', bookingSuccess ? 'Confirmed' : 'Payment'].map((label, i) => (
               <div key={label} className="flex items-center gap-2">
-                <div className={`w-8 h-8 rounded-xl flex items-center justify-center text-sm font-bold transition-all ${
-                  step > i + 1 ? 'bg-success text-white' :
-                  step === i + 1 ? 'bg-primary text-white shadow-glow' :
-                  'bg-gray-100 text-text-secondary'
-                }`}>
+                <div className={`w-8 h-8 rounded-xl flex items-center justify-center text-sm font-bold transition-all ${step > i + 1 ? 'bg-success text-white' :
+                    step === i + 1 ? 'bg-primary text-white shadow-glow' :
+                      'bg-gray-100 text-text-secondary'
+                  }`}>
                   {step > i + 1 ? <Check className="w-4 h-4" /> : i + 1}
                 </div>
                 <span className={`text-sm font-medium hidden sm:block ${step === i + 1 ? 'text-primary' : 'text-text-secondary'}`}>
@@ -222,9 +222,8 @@ const BookAppointment = () => {
                     <button
                       key={doc._id}
                       onClick={() => { setSelectedDoctor(doc); setDoctorInfo(doc); }}
-                      className={`w-full p-5 rounded-2xl border-2 transition-all text-left flex items-start gap-4 ${
-                        selectedDoctor?._id === doc._id ? 'border-primary bg-primary-light shadow-glow' : 'border-gray-100 hover:border-primary/30'
-                      }`}
+                      className={`w-full p-5 rounded-2xl border-2 transition-all text-left flex items-start gap-4 ${selectedDoctor?._id === doc._id ? 'border-primary bg-primary-light shadow-glow' : 'border-gray-100 hover:border-primary/30'
+                        }`}
                     >
                       <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-primary to-secondary flex items-center justify-center flex-shrink-0">
                         <UserIcon className="w-7 h-7 text-white" />

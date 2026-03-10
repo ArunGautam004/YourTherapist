@@ -22,6 +22,7 @@ const stagger = {
 
 const patientLinks = [
   { name: 'Dashboard', path: '/patient/dashboard', icon: LayoutDashboard },
+  { name: 'My Sessions', path: '/patient/sessions', icon: Clock },
   { name: 'Book Appointment', path: '/patient/book', icon: Calendar },
   { name: 'Mood Journal', path: '/patient/journal', icon: BookOpen },
   { name: 'Messages', path: '/patient/messages', icon: MessageCircle, badge: '3' },
@@ -65,7 +66,7 @@ const PatientDashboard = () => {
   const [notifications, setNotifications] = useState([
     { id: 1, title: 'Welcome!', desc: 'Welcome to YourTherapist', time: 'Just now', read: false }
   ]);
-  
+
   const unreadCount = notifications.filter(n => !n.read).length;
 
   const getGreeting = () => {
@@ -89,10 +90,10 @@ const PatientDashboard = () => {
               </h1>
               <p className="text-text-secondary mt-1">Here's an overview of your mental wellness journey.</p>
             </div>
-            
+
             {/* Notification Dropdown */}
             <div className="relative">
-              <button 
+              <button
                 onClick={() => {
                   setShowNotifications(!showNotifications);
                   setNotifications(prev => prev.map(n => ({ ...n, read: true })));
@@ -107,7 +108,7 @@ const PatientDashboard = () => {
 
               <AnimatePresence>
                 {showNotifications && (
-                  <motion.div 
+                  <motion.div
                     initial={{ opacity: 0, y: 10, scale: 0.95 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: 10, scale: 0.95 }}
@@ -156,7 +157,7 @@ const PatientDashboard = () => {
             <motion.div variants={fadeInUp} className="lg:col-span-3 card">
               <div className="flex items-center justify-between mb-5">
                 <h2 className="font-display font-bold text-lg text-text-primary">Upcoming Sessions</h2>
-                <Link to="/patient/book" className="text-sm text-primary font-medium hover:text-primary-dark flex items-center gap-1">
+                <Link to="/patient/sessions" className="text-sm text-primary font-medium hover:text-primary-dark flex items-center gap-1">
                   View All <ArrowRight className="w-4 h-4" />
                 </Link>
               </div>
@@ -166,47 +167,72 @@ const PatientDashboard = () => {
                 </div>
               ) : appointments.length > 0 ? (
                 <div className="space-y-3">
-                  {appointments.map((apt) => {
-                    // Determine if session is joinable (within 10 min before or during)
-                    const aptDate = new Date(apt.date);
-                    const [tPart, tPeriod] = (apt.time || '').split(' ');
-                    let [tH, tM] = (tPart || '0:0').split(':').map(Number);
-                    if (tPeriod === 'PM' && tH !== 12) tH += 12;
-                    if (tPeriod === 'AM' && tH === 12) tH = 0;
-                    aptDate.setHours(tH, tM || 0, 0, 0);
-                    const now = new Date();
-                    const diff = (aptDate - now) / 60000; // minutes until session
-                    const canJoin = diff <= 10 && diff > -(apt.duration || 50);
+                  {[...appointments].map(apt => {
+                    const safeDate = new Date(apt.date);
+                    const isValidDate = !isNaN(safeDate);
 
-                    return (
-                      <div key={apt._id} className="flex items-center gap-3 p-3 rounded-2xl bg-gray-50 hover:bg-primary-light/20 transition-colors">
-                        <div className="w-12 h-12 rounded-xl bg-primary-light flex items-center justify-center">
-                          <span className="text-xl">👨‍⚕️</span>
+                    let aptDate = new Date();
+                    let endTime = new Date();
+                    if (isValidDate) {
+                      const localY = safeDate.getFullYear();
+                      const localM = safeDate.getMonth();
+                      const localD = safeDate.getDate();
+
+                      const [tPart, tPeriod] = (apt.time || '').split(' ');
+                      let [tH, tM] = (tPart || '0:0').split(':').map(Number);
+                      if (tPeriod === 'PM' && tH !== 12) tH += 12;
+                      if (tPeriod === 'AM' && tH === 12) tH = 0;
+
+                      aptDate = new Date(localY, localM, localD, tH, tM || 0, 0, 0);
+                      endTime = new Date(aptDate.getTime() + (apt.duration || 50) * 60000);
+                    }
+
+                    const now = new Date();
+                    const diff = isValidDate ? (aptDate - now) / 60000 : Infinity;
+
+                    // A session is ongoing if it's within 10 mins of starting OR it has started but hasn't ended yet
+                    const isOngoing = isValidDate && diff <= 10 && now < endTime && apt.status !== 'cancelled';
+                    const isPast = ['completed', 'cancelled', 'no-show'].includes(apt.status) || (isValidDate && now >= endTime);
+
+                    return { ...apt, aptDate, safeDate, isValidDate, diff, isOngoing, isPast };
+                  })
+                    .filter(apt => !apt.isPast)
+                    .sort((a, b) => {
+                      if (a.isOngoing && !b.isOngoing) return -1;
+                      if (!a.isOngoing && b.isOngoing) return 1;
+                      return (a.aptDate.getTime() || 0) - (b.aptDate.getTime() || 0);
+                    })
+                    .map((apt) => {
+
+                      return (
+                        <div key={apt._id} className="flex items-center gap-3 p-3 rounded-2xl bg-gray-50 hover:bg-primary-light/20 transition-colors">
+                          <div className="w-12 h-12 rounded-xl bg-primary-light flex items-center justify-center">
+                            <span className="text-xl">👨‍⚕️</span>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-text-primary">{apt.doctor?.name || 'Dr. Therapist'}</p>
+                            <p className="text-xs text-text-secondary">{apt.doctor?.specialization || 'Clinical Psychologist'}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-sm font-semibold text-text-primary">
+                              {apt.isValidDate ? apt.safeDate.toLocaleDateString('en', { month: 'short', day: 'numeric' }) : 'Unknown Date'}
+                            </p>
+                            <p className="text-xs text-text-secondary flex items-center gap-1 justify-end">
+                              <Clock className="w-3 h-3" /> {apt.time}
+                            </p>
+                          </div>
+                          {apt.meetingLink && apt.isOngoing ? (
+                            <Link to={apt.meetingLink} className="btn-primary !px-3 !py-1.5 text-xs flex items-center gap-1">
+                              <Video className="w-3.5 h-3.5" /> Join
+                            </Link>
+                          ) : (
+                            <span className={`text-xs px-3 py-1.5 rounded-xl font-medium ${apt.isOngoing ? 'bg-success/10 text-success shadow-sm' : 'bg-primary-light/50 text-primary'}`}>
+                              {apt.isOngoing ? 'Ongoing' : (apt.diff > 60 ? `In ${Math.ceil(apt.diff / 60) > 24 ? Math.ceil(apt.diff / 1440) + 'd' : Math.ceil(apt.diff / 60) + 'h'}` : `In ${Math.ceil(apt.diff)}m`)}
+                            </span>
+                          )}
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-text-primary">{apt.doctor?.name || 'Dr. Therapist'}</p>
-                          <p className="text-xs text-text-secondary">{apt.doctor?.specialization || 'Clinical Psychologist'}</p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-sm font-semibold text-text-primary">
-                            {new Date(apt.date).toLocaleDateString('en', { month: 'short', day: 'numeric' })}
-                          </p>
-                          <p className="text-xs text-text-secondary flex items-center gap-1 justify-end">
-                            <Clock className="w-3 h-3" /> {apt.time}
-                          </p>
-                        </div>
-                        {apt.meetingLink && canJoin ? (
-                          <Link to={apt.meetingLink} className="btn-primary !px-3 !py-1.5 text-xs flex items-center gap-1">
-                            <Video className="w-3.5 h-3.5" /> Join
-                          </Link>
-                        ) : (
-                          <span className="text-xs text-text-secondary bg-gray-100 px-3 py-1.5 rounded-xl">
-                            {diff > 10 ? `In ${Math.ceil(diff / 60) > 24 ? Math.ceil(diff / 1440) + 'd' : Math.ceil(diff / 60) + 'h'}` : 'Ended'}
-                          </span>
-                        )}
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
                 </div>
               ) : (
                 <div className="text-center py-8">

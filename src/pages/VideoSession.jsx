@@ -1,10 +1,10 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Mic, MicOff, Video as VideoIcon, VideoOff, PhoneOff, Monitor,
-  MessageSquare, ClipboardList, Users, Maximize, Minimize,
-  Send, X, ChevronRight, CheckCircle2, Clock, Brain, Loader2
+  MessageSquare, ClipboardList, Maximize, Minimize,
+  Send, X, ChevronRight, CheckCircle2, Clock, Brain, Loader2, User, Stethoscope
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
@@ -13,17 +13,37 @@ import { appointmentAPI } from '../services/api';
 
 const servers = {
   iceServers: [
-    { urls: ['stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'] }
+    { urls: ['stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'] },
+    { urls: ['stun:stun3.l.google.com:19302', 'stun:stun4.l.google.com:19302'] },
   ]
 };
 
 const defaultQuestions = [
-  { id: 1, text: 'How would you rate your overall mood this past week?', type: 'scale', options: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'] },
+  { id: 1, text: 'How would you rate your overall mood this past week?', type: 'scale', options: ['1','2','3','4','5','6','7','8','9','10'] },
   { id: 2, text: 'How often have you felt nervous or anxious?', type: 'choice', options: ['Not at all', 'Several days', 'More than half the days', 'Nearly every day'] },
   { id: 3, text: 'How would you describe your sleep quality?', type: 'choice', options: ['Very poor', 'Poor', 'Fair', 'Good', 'Excellent'] },
   { id: 4, text: 'Have you been able to practice the coping techniques we discussed?', type: 'choice', options: ['Yes, regularly', 'Sometimes', 'Rarely', 'Not at all'] },
   { id: 5, text: 'Is there anything specific you would like to discuss today?', type: 'text' },
 ];
+
+// Avatar shown when camera is off or while connecting
+const ParticipantAvatar = ({ name, role, size = 'large' }) => {
+  const isDoctor = role === 'doctor' || role === 'admin';
+  const initials = name
+    ? name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
+    : (isDoctor ? 'DR' : 'PT');
+
+  const large = size === 'large';
+  return (
+    <div className={`flex flex-col items-center gap-3`}>
+      <div className={`${large ? 'w-28 h-28' : 'w-12 h-12'} rounded-full bg-gradient-to-br from-primary/80 to-secondary/80 flex items-center justify-center shadow-lg border-2 border-white/20`}>
+        <span className={`${large ? 'text-4xl' : 'text-lg'} font-bold text-white font-display`}>{initials}</span>
+      </div>
+      {name && <span className={`text-white font-medium ${large ? 'text-lg' : 'text-xs'} bg-black/30 px-3 py-1 rounded-full`}>{isDoctor && !name.toLowerCase().startsWith('dr') ? `Dr. ${name}` : name}</span>}
+      {!name && <span className={`text-gray-300 ${large ? 'text-base' : 'text-xs'}`}>{isDoctor ? 'Doctor' : 'Patient'}</span>}
+    </div>
+  );
+};
 
 const VideoSession = () => {
   const { id: roomId } = useParams();
@@ -32,17 +52,24 @@ const VideoSession = () => {
 
   const [isInWaitingRoom, setIsInWaitingRoom] = useState(true);
   const [sessionActive, setSessionActive] = useState(false);
-  const [isDoctorPresent, setIsDoctorPresent] = useState(user?.role === 'doctor' || user?.role === 'admin');
+  const [remoteParticipant, setRemoteParticipant] = useState(null); // { name, role }
+  const [isRemoteVideoActive, setIsRemoteVideoActive] = useState(false);
+  const [isRemoteConnected, setIsRemoteConnected] = useState(false); // socket-level connection
   const [micOn, setMicOn] = useState(true);
   const [videoOn, setVideoOn] = useState(true);
   const [showChat, setShowChat] = useState(false);
-  const showChatRef = useRef(false);
-  useEffect(() => { showChatRef.current = showChat; }, [showChat]);
-
   const [showQuestionnaire, setShowQuestionnaire] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  const showChatRef = useRef(false);
+  useEffect(() => {
+    showChatRef.current = showChat;
+    if (showChat) setUnreadCount(0);
+  }, [showChat]);
 
   const [chatMessage, setChatMessage] = useState('');
   const [chatMessages, setChatMessages] = useState([]);
+  const chatBottomRef = useRef(null);
 
   const [questions, setQuestions] = useState(defaultQuestions);
   const [currentQuestion, setCurrentQuestion] = useState(0);
@@ -58,20 +85,26 @@ const VideoSession = () => {
   const peerConnection = useRef(null);
   const localStream = useRef(null);
   const pendingCandidates = useRef([]);
+  const isOfferSent = useRef(false);
 
-  // Custom waiting room check
+  // Scroll chat to bottom on new messages
+  useEffect(() => {
+    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages]);
+
+  // Fetch appointment info
   useEffect(() => {
     const fetchAppointment = async () => {
       try {
-        // If it's a real mongo ID we can fetch, otherwise it's a test room
-        if (roomId.length === 24) {
+        if (roomId && roomId.length === 24) {
           const { data } = await appointmentAPI.getById(roomId);
           setAppointment(data);
         } else {
-          setAppointment({ doctor: { name: 'Dr. Therapist' }, status: 'scheduled' });
+          setAppointment({ doctor: { name: 'Dr. Therapist' }, patient: { name: 'Patient' }, status: 'scheduled' });
         }
       } catch (err) {
         console.error('Failed to load appointment:', err);
+        setAppointment({ doctor: { name: 'Doctor' }, patient: { name: 'Patient' }, status: 'scheduled' });
       } finally {
         setLoading(false);
       }
@@ -79,7 +112,7 @@ const VideoSession = () => {
     fetchAppointment();
   }, [roomId]);
 
-  // Handle local media setup (for waiting room preview and session)
+  // Set up local media (waiting room preview + session)
   useEffect(() => {
     const setupMedia = async () => {
       try {
@@ -89,6 +122,7 @@ const VideoSession = () => {
           localVideoRef.current.srcObject = stream;
         }
       } catch (err) {
+        console.error('Media error:', err);
         toast.error('Could not access camera/microphone');
         setVideoOn(false);
         setMicOn(false);
@@ -96,133 +130,170 @@ const VideoSession = () => {
     };
     setupMedia();
     return () => {
-      if (localStream.current) {
-        localStream.current.getTracks().forEach(track => track.stop());
-      }
+      localStream.current?.getTracks().forEach(track => track.stop());
     };
   }, []);
 
-  // Sync mic/video toggles with localStream tracks
+  // Sync mic/video toggles
   useEffect(() => {
     if (localStream.current) {
-      localStream.current.getAudioTracks().forEach(track => { track.enabled = micOn; });
-      localStream.current.getVideoTracks().forEach(track => { track.enabled = videoOn; });
+      localStream.current.getAudioTracks().forEach(t => { t.enabled = micOn; });
+      localStream.current.getVideoTracks().forEach(t => { t.enabled = videoOn; });
     }
   }, [micOn, videoOn]);
 
-  // Status check for Patient in Waiting Room
+  // Keep local video attached after re-renders
   useEffect(() => {
-    if (user?.role !== 'patient' || sessionActive) return;
+    if (localStream.current && localVideoRef.current && !localVideoRef.current.srcObject) {
+      localVideoRef.current.srcObject = localStream.current;
+    }
+  });
 
-    const socket = getSocket();
-    if (!socket) return;
-
-    const handleRoomStatus = ({ hasDoctor }) => {
-      setIsDoctorPresent(hasDoctor);
-    };
-
-    socket.emit('call:check-room', roomId);
-    socket.on('call:room-status', handleRoomStatus);
-
-    return () => {
-      socket.off('call:room-status', handleRoomStatus);
-    };
-  }, [roomId, user, sessionActive]);
-
-  // Main WebRTC & Socket logic when session is active
+  // ─── Main WebRTC + Socket Logic ──────────────────────────────────────────
   useEffect(() => {
-    if (!sessionActive || !localStream.current) return;
+    if (!sessionActive) return;
 
     const socket = getSocket();
     if (!socket) {
-      toast.error('Socket not connected');
+      toast.error('Socket not connected. Please refresh.');
       return;
     }
 
-    // Initialize WebRTC Peer Connection
-    peerConnection.current = new RTCPeerConnection(servers);
+    // Create peer connection
+    const pc = new RTCPeerConnection(servers);
+    peerConnection.current = pc;
+    isOfferSent.current = false;
 
-    // Add local tracks to PC
-    localStream.current.getTracks().forEach(track => {
-      peerConnection.current.addTrack(track, localStream.current);
-    });
+    // Add local tracks
+    if (localStream.current) {
+      localStream.current.getTracks().forEach(track => {
+        pc.addTrack(track, localStream.current);
+      });
+    }
 
-    // Handle incoming remote tracks
-    peerConnection.current.ontrack = (event) => {
-      if (remoteVideoRef.current) {
+    // Receive remote tracks
+    pc.ontrack = (event) => {
+      console.log('[WebRTC] Got remote track', event.streams);
+      if (remoteVideoRef.current && event.streams[0]) {
         remoteVideoRef.current.srcObject = event.streams[0];
+        setIsRemoteVideoActive(true);
       }
     };
 
-    // Handle ICE candidates
-    peerConnection.current.onicecandidate = (event) => {
+    // ICE candidates
+    pc.onicecandidate = (event) => {
       if (event.candidate) {
         socket.emit('call:ice-candidate', { roomId, candidate: event.candidate });
       }
     };
 
-    // Socket Event Listeners for WebRTC
-    const handleCallReady = async () => {
-      // Caller (Doctor/Admin) creates the offer
-      if (user?.role === 'doctor' || user?.role === 'admin') {
+    pc.onconnectionstatechange = () => {
+      console.log('[WebRTC] Connection state:', pc.connectionState);
+      if (pc.connectionState === 'connected') {
+        setIsRemoteVideoActive(true);
+      } else if (['disconnected', 'failed', 'closed'].includes(pc.connectionState)) {
+        setIsRemoteVideoActive(false);
+      }
+    };
+
+    // ── Socket Handlers ──
+
+    // Both users joined → doctor creates offer
+    const handleCallReady = async ({ participants }) => {
+      console.log('[Socket] call:ready', participants);
+      // Update remote participant info if provided
+      if (participants) {
+        const remote = participants.find(p => p.userId !== user?._id && p.userId !== user?.id);
+        if (remote) setRemoteParticipant({ name: remote.name, role: remote.role });
+      }
+      setIsRemoteConnected(true);
+
+      const isDoctor = user?.role === 'doctor' || user?.role === 'admin';
+      if (isDoctor && !isOfferSent.current) {
+        isOfferSent.current = true;
         try {
-          const offer = await peerConnection.current.createOffer();
-          await peerConnection.current.setLocalDescription(offer);
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
           socket.emit('call:offer', { roomId, offer });
         } catch (err) {
-          console.error('Error creating offer:', err);
+          console.error('[WebRTC] Error creating offer:', err);
         }
       }
     };
 
-    const handleCallOffer = async ({ offer, from }) => {
-      // Patient receives offer, creates answer
-      try {
-        await peerConnection.current.setRemoteDescription(new RTCSessionDescription(offer));
-        // Process any candidates that arrived before the description was set
-        pendingCandidates.current.forEach(c => peerConnection.current.addIceCandidate(new RTCIceCandidate(c)));
-        pendingCandidates.current = [];
+    const handleUserJoined = ({ participant }) => {
+      console.log('[Socket] call:user-joined', participant);
+      if (participant && participant.userId !== (user?._id || user?.id)) {
+        setRemoteParticipant({ name: participant.name, role: participant.role });
+        setIsRemoteConnected(true);
+        toast.success(`${participant.name || 'Participant'} joined the session`);
+      }
+    };
 
-        const answer = await peerConnection.current.createAnswer();
-        await peerConnection.current.setLocalDescription(answer);
+    const handleCallOffer = async ({ offer }) => {
+      console.log('[Socket] call:offer received');
+      try {
+        await pc.setRemoteDescription(new RTCSessionDescription(offer));
+        // Flush pending ICE candidates
+        for (const c of pendingCandidates.current) {
+          await pc.addIceCandidate(new RTCIceCandidate(c)).catch(console.warn);
+        }
+        pendingCandidates.current = [];
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
         socket.emit('call:answer', { roomId, answer });
       } catch (err) {
-        console.error('Error handling offer:', err);
+        console.error('[WebRTC] Error handling offer:', err);
       }
     };
 
     const handleCallAnswer = async ({ answer }) => {
-      // Doctor receives answer
+      console.log('[Socket] call:answer received');
       try {
-        await peerConnection.current.setRemoteDescription(new RTCSessionDescription(answer));
-        pendingCandidates.current.forEach(c => peerConnection.current.addIceCandidate(new RTCIceCandidate(c)));
+        await pc.setRemoteDescription(new RTCSessionDescription(answer));
+        for (const c of pendingCandidates.current) {
+          await pc.addIceCandidate(new RTCIceCandidate(c)).catch(console.warn);
+        }
         pendingCandidates.current = [];
       } catch (err) {
-        console.error('Error handling answer:', err);
+        console.error('[WebRTC] Error handling answer:', err);
       }
     };
 
     const handleIceCandidate = async ({ candidate }) => {
+      if (!candidate) return;
       try {
-        if (peerConnection.current.remoteDescription) {
-          await peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
+        if (pc.remoteDescription && pc.remoteDescription.type) {
+          await pc.addIceCandidate(new RTCIceCandidate(candidate));
         } else {
           pendingCandidates.current.push(candidate);
         }
       } catch (err) {
-        console.error('Error adding ICE candidate:', err);
+        console.warn('[WebRTC] ICE candidate error:', err);
       }
     };
 
-    const handleCallEnded = () => {
-      toast('The other person left the call.', { icon: 'ℹ️' });
-      navigate('/patient/dashboard');
+    const handleCallEnded = ({ participant } = {}) => {
+      const name = participant?.name || remoteParticipant?.name || 'The other person';
+      toast(`${name} left the session.`, { icon: 'ℹ️' });
+      setIsRemoteVideoActive(false);
+      setIsRemoteConnected(false);
+      if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
     };
 
-    // Chat and Questionnaire Events
+    // ── Chat ──
+    // FIX: server must broadcast room:message back to all clients in the room
+    // The sender adds message locally; receiver gets it via this event.
     const handleRoomMessage = (msg) => {
-      setChatMessages(prev => [...prev, msg]);
-      if (!showChatRef.current) toast('New message in chat', { icon: '💬' });
+      // Only add if the message was sent by someone else
+      const myId = user?._id || user?.id;
+      if (msg.senderId && msg.senderId === myId) return; // already added locally
+
+      setChatMessages(prev => [...prev, { ...msg, isOwn: false }]);
+      if (!showChatRef.current) {
+        setUnreadCount(prev => prev + 1);
+        toast('New message', { icon: '💬' });
+      }
     };
 
     const handleQuestionnaireReceive = (q) => {
@@ -232,39 +303,36 @@ const VideoSession = () => {
       setQuestionnaireSubmitted(false);
       setShowQuestionnaire(true);
       setShowChat(false);
-      toast('Received a new questionnaire', { icon: '📋' });
+      toast('Received a check-in survey', { icon: '📋' });
     };
 
-    const handleQuestionnaireResponse = (res) => {
+    const handleQuestionnaireResponse = () => {
       toast.success('Patient submitted the questionnaire!');
-      // Doctor logic to view responses could go here
     };
 
-    // Register all socket listeners
-    socket.on('call:ready', () => {
-      setIsDoctorPresent(true);
-      handleCallReady();
-    });
-    socket.on('call:waiting-for-doctor', () => {
-      setIsDoctorPresent(false);
-    });
+    // Register listeners
+    socket.on('call:ready', handleCallReady);
+    socket.on('call:user-joined', handleUserJoined);
     socket.on('call:offer', handleCallOffer);
     socket.on('call:answer', handleCallAnswer);
     socket.on('call:ice-candidate', handleIceCandidate);
     socket.on('call:ended', handleCallEnded);
-
-    // Using a custom room message event just for the video session chat
     socket.on('room:message', handleRoomMessage);
     socket.on('questionnaire:receive', handleQuestionnaireReceive);
     socket.on('questionnaire:response', handleQuestionnaireResponse);
 
-    // Join the room
-    socket.emit('call:join-room', { roomId, role: user?.role });
+    // Join room — send user info so the other side can show name/role
+    const userName = user?.name || user?.fullName || (user?.role === 'doctor' ? 'Doctor' : 'Patient');
+    socket.emit('call:join-room', {
+      roomId,
+      role: user?.role,
+      userId: user?._id || user?.id,
+      name: userName,
+    });
 
     return () => {
-      // Cleanup
       socket.off('call:ready', handleCallReady);
-      socket.off('call:waiting-for-doctor');
+      socket.off('call:user-joined', handleUserJoined);
       socket.off('call:offer', handleCallOffer);
       socket.off('call:answer', handleCallAnswer);
       socket.off('call:ice-candidate', handleIceCandidate);
@@ -272,20 +340,12 @@ const VideoSession = () => {
       socket.off('room:message', handleRoomMessage);
       socket.off('questionnaire:receive', handleQuestionnaireReceive);
       socket.off('questionnaire:response', handleQuestionnaireResponse);
-
-      socket.emit('call:end', roomId);
-      if (peerConnection.current) {
-        peerConnection.current.close();
-      }
+      socket.emit('call:end', { roomId });
+      pc.close();
     };
-  }, [sessionActive, roomId, user, navigate]);
+  }, [sessionActive, roomId, user]);
 
-  // Keep local video attached if re-rendered
-  useEffect(() => {
-    if (localStream.current && localVideoRef.current) {
-      localVideoRef.current.srcObject = localStream.current;
-    }
-  });
+  // ─── Handlers ────────────────────────────────────────────────────────────
 
   const handleJoinSession = () => {
     setIsInWaitingRoom(false);
@@ -294,33 +354,40 @@ const VideoSession = () => {
 
   const handleEndCall = () => {
     const socket = getSocket();
-    if (socket) socket.emit('call:end', roomId);
-    if (localStream.current) {
-      localStream.current.getTracks().forEach(track => track.stop());
-    }
-    navigate(user?.role === 'doctor' ? '/admin/dashboard' : '/patient/dashboard');
+    if (socket) socket.emit('call:end', { roomId });
+    localStream.current?.getTracks().forEach(t => t.stop());
+    navigate(user?.role === 'doctor' || user?.role === 'admin' ? '/admin/dashboard' : '/patient/dashboard');
   };
 
   const handleSendMessage = (e) => {
     e.preventDefault();
-    if (!chatMessage.trim()) return;
+    const text = chatMessage.trim();
+    if (!text) return;
 
-    const msg = { sender: user?.role || 'patient', text: chatMessage.trim(), time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
+    const myId = user?._id || user?.id;
+    const userName = user?.name || user?.fullName || (user?.role === 'doctor' ? 'Doctor' : 'Patient');
+    const msg = {
+      senderId: myId,
+      senderName: userName,
+      senderRole: user?.role,
+      text,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      isOwn: true,
+    };
+
+    // Add locally immediately (optimistic)
     setChatMessages(prev => [...prev, msg]);
+    setChatMessage('');
 
     const socket = getSocket();
     if (socket) socket.emit('room:message', { roomId, message: msg });
-
-    setChatMessage('');
   };
 
   const handleSendQuestionnaire = () => {
-    if (user?.role === 'doctor') {
-      const socket = getSocket();
-      if (socket) {
-        socket.emit('questionnaire:push', { roomId, questionnaire: defaultQuestions });
-        toast.success('Questionnaire sent to patient');
-      }
+    const socket = getSocket();
+    if (socket) {
+      socket.emit('questionnaire:push', { roomId, questionnaire: defaultQuestions });
+      toast.success('Questionnaire sent to patient');
     }
   };
 
@@ -328,16 +395,27 @@ const VideoSession = () => {
     setQuestionnaireSubmitted(true);
     const socket = getSocket();
     if (socket) socket.emit('questionnaire:submit', { roomId, responses: answers });
-
     setTimeout(() => {
       setShowQuestionnaire(false);
       setQuestionnaireSubmitted(false);
     }, 2000);
   };
 
-  // ============ WAITING ROOM ============
+  // ─── Derived values ───────────────────────────────────────────────────────
+  const isDoctor = user?.role === 'doctor' || user?.role === 'admin';
+  const myName = user?.name || user?.fullName || (isDoctor ? 'Doctor' : 'Patient');
+  const otherName = isDoctor
+    ? (appointment?.patient?.name || remoteParticipant?.name || 'Patient')
+    : (appointment?.doctor?.name || remoteParticipant?.name || 'Doctor');
+  const otherRole = isDoctor ? 'patient' : 'doctor';
+
+  // ─── Waiting Room ─────────────────────────────────────────────────────────
   if (isInWaitingRoom) {
-    if (loading) return <div className="min-h-screen bg-gray-900 flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
+    if (loading) return (
+      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
 
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center p-4">
@@ -346,20 +424,16 @@ const VideoSession = () => {
           animate={{ opacity: 1, scale: 1 }}
           className="max-w-lg w-full text-center"
         >
-          {/* Video Preview */}
+          {/* Self video preview */}
           <div className="relative rounded-3xl overflow-hidden bg-gray-700 aspect-video mb-8 shadow-soft-xl">
             <video
               ref={localVideoRef}
-              autoPlay
-              playsInline
-              muted
+              autoPlay playsInline muted
               className="absolute inset-0 w-full h-full object-cover transform scale-x-[-1]"
             />
-            {(!videoOn) && (
+            {!videoOn && (
               <div className="absolute inset-0 flex items-center justify-center bg-gray-800">
-                <div className="w-24 h-24 rounded-full bg-primary/20 flex items-center justify-center">
-                  <span className="text-5xl">{user?.role === 'doctor' || user?.role === 'admin' ? '👩‍⚕️' : '👤'}</span>
-                </div>
+                <ParticipantAvatar name={myName} role={user?.role} size="large" />
               </div>
             )}
             <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-3">
@@ -376,6 +450,10 @@ const VideoSession = () => {
                 {videoOn ? <VideoIcon className="w-5 h-5" /> : <VideoOff className="w-5 h-5" />}
               </button>
             </div>
+            {/* Name tag */}
+            <div className="absolute top-3 left-3 bg-black/50 text-white text-xs px-2 py-1 rounded-lg">
+              {myName} (You)
+            </div>
           </div>
 
           <div className="flex items-center justify-center gap-2 mb-4">
@@ -390,13 +468,8 @@ const VideoSession = () => {
           <h2 className="font-display text-2xl font-bold text-white mb-2">Waiting Room</h2>
           <p className="text-gray-400 mb-2">
             Your session with{' '}
-            <span className="text-white font-medium">
-              {(user?.role === 'doctor' || user?.role === 'admin')
-                ? (appointment?.patient?.name || 'Patient')
-                : (appointment?.doctor?.name || 'Doctor')}
-            </span>
+            <span className="text-white font-medium">{otherName}</span>
           </p>
-
           <div className="flex items-center justify-center gap-2 text-primary-300 mb-8">
             <Clock className="w-4 h-4 animate-pulse" />
             <span className="text-sm font-medium">Session scheduled for today</span>
@@ -404,69 +477,92 @@ const VideoSession = () => {
 
           <button
             onClick={handleJoinSession}
-            disabled={!isDoctorPresent && user?.role === 'patient'}
-            className={`font-semibold px-10 py-4 rounded-2xl transition-all duration-300 w-full sm:w-auto ${(!isDoctorPresent && user?.role === 'patient') ? 'bg-gray-700 text-gray-400 cursor-not-allowed' : 'bg-gradient-to-r from-primary to-primary-dark text-white hover:shadow-glow-lg active:scale-[0.98]'}`}
+            className="font-semibold px-10 py-4 rounded-2xl transition-all duration-300 w-full sm:w-auto bg-gradient-to-r from-primary to-primary-dark text-white hover:shadow-glow-lg active:scale-[0.98]"
           >
-            {(!isDoctorPresent && user?.role === 'patient') ? (
-              <span className="flex items-center justify-center gap-2">
-                <Loader2 className="w-5 h-5 animate-spin" />
-                Waiting for Doctor to join...
-              </span>
-            ) : (
-              'Join Session'
-            )}
+            Join Session
           </button>
         </motion.div>
       </div>
     );
   }
 
-  // ============ VIDEO SESSION ============
+  // ─── Video Session ────────────────────────────────────────────────────────
   return (
     <div className="h-screen bg-gray-900 flex flex-col">
       <div className="flex-1 flex relative overflow-hidden">
-        {/* Main Video (Remote) */}
+        {/* Main Video Area (Remote) */}
         <div className="flex-1 relative">
           <video
             ref={remoteVideoRef}
-            autoPlay
-            playsInline
-            className="absolute inset-0 w-full h-full object-cover"
+            autoPlay playsInline
+            className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-500 ${isRemoteVideoActive ? 'opacity-100' : 'opacity-0'}`}
           />
-          {!remoteVideoRef.current?.srcObject && (
+
+          {/* Placeholder when remote video isn't active */}
+          {!isRemoteVideoActive && (
             <div className="absolute inset-0 bg-gradient-to-br from-gray-800 to-gray-900 flex items-center justify-center">
-              <div className="text-center">
-                <Loader2 className="w-12 h-12 text-primary animate-spin mx-auto mb-4" />
-                <p className="text-white font-display font-medium">Waiting for other participant...</p>
+              <div className="text-center space-y-4">
+                {isRemoteConnected ? (
+                  // Other person connected but video not streaming yet
+                  <>
+                    <ParticipantAvatar name={otherName} role={otherRole} size="large" />
+                    <p className="text-gray-400 text-sm animate-pulse">Connecting video…</p>
+                  </>
+                ) : (
+                  // No one connected yet
+                  <>
+                    <div className="w-28 h-28 rounded-full bg-gray-700 border-2 border-dashed border-gray-500 flex items-center justify-center mx-auto">
+                      {otherRole === 'doctor' ? (
+                        <Stethoscope className="w-12 h-12 text-gray-500" />
+                      ) : (
+                        <User className="w-12 h-12 text-gray-500" />
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-white font-medium text-lg">{otherName}</p>
+                      <p className="text-gray-400 text-sm mt-1 flex items-center justify-center gap-2">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Waiting for them to join…
+                      </p>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           )}
 
-          {/* Self Video (Picture-in-Picture) */}
-          <div className="absolute bottom-4 right-4 w-48 h-36 rounded-2xl bg-gray-700 overflow-hidden shadow-soft-xl border-2 border-gray-600">
+          {/* Remote participant name tag */}
+          {isRemoteConnected && (
+            <div className="absolute bottom-4 left-4 bg-black/50 backdrop-blur-sm text-white text-sm px-3 py-1.5 rounded-xl flex items-center gap-2 z-10">
+              <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+              {otherName}
+            </div>
+          )}
+
+          {/* Self Video (PiP) */}
+          <div className="absolute bottom-4 right-4 w-48 h-36 rounded-2xl bg-gray-700 overflow-hidden shadow-soft-xl border-2 border-gray-600 z-10">
             <video
               ref={localVideoRef}
-              autoPlay
-              playsInline
-              muted
+              autoPlay playsInline muted
               className={`absolute inset-0 w-full h-full object-cover transform scale-x-[-1] transition-opacity ${videoOn ? 'opacity-100' : 'opacity-0'}`}
             />
             {!videoOn && (
               <div className="absolute inset-0 flex items-center justify-center bg-gray-800">
-                <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center">
-                  <span className="text-2xl">{user?.role === 'doctor' ? '👩‍⚕️' : '👤'}</span>
-                </div>
+                <ParticipantAvatar name={myName} role={user?.role} size="small" />
               </div>
             )}
-            <div className="absolute bottom-2 left-2 bg-black/50 text-white text-xs px-2 py-1 rounded-lg">You</div>
+            <div className="absolute bottom-2 left-2 bg-black/50 text-white text-xs px-2 py-1 rounded-lg">
+              You
+            </div>
           </div>
 
-          {/* Session Timer */}
+          {/* Top-left: Live indicator */}
           <div className="absolute top-4 left-4 bg-black/40 backdrop-blur-sm text-white px-4 py-2 rounded-xl flex items-center gap-2 text-sm z-10">
             <div className="w-2 h-2 bg-danger rounded-full animate-pulse" />
             <span className="font-medium">Live</span>
           </div>
 
+          {/* Top-right: Encrypted badge */}
           <div className="absolute top-4 right-4 bg-black/40 backdrop-blur-sm text-white px-4 py-2 rounded-xl text-sm font-medium z-10">
             🔒 Encrypted
           </div>
@@ -488,27 +584,45 @@ const VideoSession = () => {
                   {showChat ? <MessageSquare className="w-4 h-4" /> : <ClipboardList className="w-4 h-4" />}
                   {showChat ? 'Session Chat' : 'Questionnaire'}
                 </h3>
-                <button onClick={() => { setShowChat(false); setShowQuestionnaire(false); }} className="p-1.5 rounded-lg hover:bg-gray-700 text-gray-400 transition-colors">
+                <button
+                  onClick={() => { setShowChat(false); setShowQuestionnaire(false); }}
+                  className="p-1.5 rounded-lg hover:bg-gray-700 text-gray-400 transition-colors"
+                >
                   <X className="w-4 h-4" />
                 </button>
               </div>
 
-              {/* Chat Messages */}
+              {/* Chat */}
               {showChat && (
                 <>
                   <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                    {chatMessages.length === 0 && (
+                      <p className="text-center text-gray-500 text-sm mt-8">No messages yet. Say hello! 👋</p>
+                    )}
                     {chatMessages.map((msg, i) => {
-                      const isOwn = msg.sender === user?.role;
+                      const isOwn = msg.isOwn === true;
                       return (
                         <div key={i} className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}>
-                          <div className={`max-w-[85%] p-3 rounded-2xl text-sm ${isOwn ? 'bg-primary text-white rounded-br-md' : 'bg-gray-700 text-gray-200 rounded-bl-md'}`}>
-                            <p>{msg.text}</p>
-                            <p className={`text-xs mt-1 ${isOwn ? 'text-white/50' : 'text-gray-500'}`}>{msg.time}</p>
+                          {!isOwn && (
+                            <div className="w-7 h-7 rounded-full bg-primary/30 flex items-center justify-center mr-2 shrink-0 self-end mb-1">
+                              <span className="text-xs text-white font-bold">
+                                {(msg.senderName || otherName || 'P').charAt(0).toUpperCase()}
+                              </span>
+                            </div>
+                          )}
+                          <div className="max-w-[80%]">
+                            {!isOwn && (
+                              <p className="text-xs text-gray-400 mb-1 ml-1">{msg.senderName || otherName}</p>
+                            )}
+                            <div className={`p-3 rounded-2xl text-sm ${isOwn ? 'bg-primary text-white rounded-br-md' : 'bg-gray-700 text-gray-200 rounded-bl-md'}`}>
+                              <p>{msg.text}</p>
+                              <p className={`text-xs mt-1 ${isOwn ? 'text-white/50' : 'text-gray-500'}`}>{msg.time}</p>
+                            </div>
                           </div>
                         </div>
                       );
                     })}
-                    {chatMessages.length === 0 && <p className="text-center text-gray-500 text-sm mt-4">No messages yet</p>}
+                    <div ref={chatBottomRef} />
                   </div>
                   <div className="p-3 border-t border-gray-700">
                     <form onSubmit={handleSendMessage} className="flex items-center gap-2">
@@ -519,7 +633,11 @@ const VideoSession = () => {
                         placeholder="Type a message..."
                         className="flex-1 bg-gray-700 text-white placeholder:text-gray-500 px-4 py-2.5 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
                       />
-                      <button type="submit" disabled={!chatMessage.trim()} className="p-2.5 rounded-xl bg-primary text-white hover:bg-primary-dark transition-colors disabled:opacity-50">
+                      <button
+                        type="submit"
+                        disabled={!chatMessage.trim()}
+                        className="p-2.5 rounded-xl bg-primary text-white hover:bg-primary-dark transition-colors disabled:opacity-50"
+                      >
                         <Send className="w-4 h-4" />
                       </button>
                     </form>
@@ -530,7 +648,7 @@ const VideoSession = () => {
               {/* Questionnaire */}
               {showQuestionnaire && (
                 <div className="flex-1 overflow-y-auto p-4">
-                  {user?.role === 'doctor' ? (
+                  {isDoctor ? (
                     <div className="text-center mt-10 space-y-4">
                       <ClipboardList className="w-12 h-12 text-primary mx-auto opacity-80" />
                       <h4 className="text-white font-medium text-lg">Send Check-in Survey</h4>
@@ -538,10 +656,16 @@ const VideoSession = () => {
                       <button onClick={handleSendQuestionnaire} className="btn-primary w-full">Send to Patient</button>
                     </div>
                   ) : questionnaireSubmitted ? (
-                    <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="flex flex-col items-center justify-center h-full text-center">
-                      <div className="w-16 h-16 rounded-full bg-success/20 flex items-center justify-center mb-4"><CheckCircle2 className="w-8 h-8 text-success" /></div>
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      className="flex flex-col items-center justify-center h-full text-center"
+                    >
+                      <div className="w-16 h-16 rounded-full bg-success/20 flex items-center justify-center mb-4">
+                        <CheckCircle2 className="w-8 h-8 text-success" />
+                      </div>
                       <h4 className="text-white font-bold text-lg mb-2">Submitted!</h4>
-                      <p className="text-gray-400 text-sm">Your responses have been recorded by your doctor.</p>
+                      <p className="text-gray-400 text-sm">Your responses have been recorded.</p>
                     </motion.div>
                   ) : (
                     <>
@@ -551,12 +675,20 @@ const VideoSession = () => {
                           <span className="text-xs text-primary-300">{Math.round(((currentQuestion + 1) / questions.length) * 100)}%</span>
                         </div>
                         <div className="w-full bg-gray-700 rounded-full h-1.5">
-                          <div className="bg-gradient-to-r from-primary to-secondary rounded-full h-1.5 transition-all duration-300" style={{ width: `${((currentQuestion + 1) / questions.length) * 100}%` }} />
+                          <div
+                            className="bg-gradient-to-r from-primary to-secondary rounded-full h-1.5 transition-all duration-300"
+                            style={{ width: `${((currentQuestion + 1) / questions.length) * 100}%` }}
+                          />
                         </div>
                       </div>
 
                       <AnimatePresence mode="wait">
-                        <motion.div key={currentQuestion} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+                        <motion.div
+                          key={currentQuestion}
+                          initial={{ opacity: 0, x: 20 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          exit={{ opacity: 0, x: -20 }}
+                        >
                           <p className="text-white font-medium mb-4 leading-relaxed">{questions[currentQuestion].text}</p>
 
                           {questions[currentQuestion].type === 'scale' && (
@@ -600,11 +732,27 @@ const VideoSession = () => {
                       </AnimatePresence>
 
                       <div className="flex items-center justify-between mt-6">
-                        <button onClick={() => setCurrentQuestion(Math.max(0, currentQuestion - 1))} disabled={currentQuestion === 0} className="px-4 py-2 rounded-xl text-sm text-gray-400 hover:text-white disabled:opacity-30 transition-colors">Previous</button>
+                        <button
+                          onClick={() => setCurrentQuestion(Math.max(0, currentQuestion - 1))}
+                          disabled={currentQuestion === 0}
+                          className="px-4 py-2 rounded-xl text-sm text-gray-400 hover:text-white disabled:opacity-30 transition-colors"
+                        >
+                          Previous
+                        </button>
                         {currentQuestion < questions.length - 1 ? (
-                          <button onClick={() => setCurrentQuestion(currentQuestion + 1)} className="px-5 py-2.5 rounded-xl bg-primary text-white text-sm font-medium hover:bg-primary-dark transition-colors flex items-center gap-1">Next <ChevronRight className="w-4 h-4" /></button>
+                          <button
+                            onClick={() => setCurrentQuestion(currentQuestion + 1)}
+                            className="px-5 py-2.5 rounded-xl bg-primary text-white text-sm font-medium hover:bg-primary-dark transition-colors flex items-center gap-1"
+                          >
+                            Next <ChevronRight className="w-4 h-4" />
+                          </button>
                         ) : (
-                          <button onClick={handleSubmitQuestionnaire} className="px-5 py-2.5 rounded-xl bg-success text-white text-sm font-medium hover:bg-success/80 transition-colors flex items-center gap-1"><CheckCircle2 className="w-4 h-4" /> Submit</button>
+                          <button
+                            onClick={handleSubmitQuestionnaire}
+                            className="px-5 py-2.5 rounded-xl bg-success text-white text-sm font-medium hover:bg-success/80 transition-colors flex items-center gap-1"
+                          >
+                            <CheckCircle2 className="w-4 h-4" /> Submit
+                          </button>
                         )}
                       </div>
                     </>
@@ -621,28 +769,56 @@ const VideoSession = () => {
         <div className="flex items-center justify-between max-w-3xl mx-auto">
           {/* Left Controls */}
           <div className="flex items-center gap-2">
-            <button onClick={() => setMicOn(!micOn)} className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-200 ${micOn ? 'bg-gray-700 text-white hover:bg-gray-600' : 'bg-danger text-white'}`} title={micOn ? 'Mute' : 'Unmute'}>
+            <button
+              onClick={() => setMicOn(!micOn)}
+              className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-200 ${micOn ? 'bg-gray-700 text-white hover:bg-gray-600' : 'bg-danger text-white'}`}
+              title={micOn ? 'Mute' : 'Unmute'}
+            >
               {micOn ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
             </button>
-            <button onClick={() => setVideoOn(!videoOn)} className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-200 ${videoOn ? 'bg-gray-700 text-white hover:bg-gray-600' : 'bg-danger text-white'}`} title={videoOn ? 'Turn off camera' : 'Turn on camera'}>
+            <button
+              onClick={() => setVideoOn(!videoOn)}
+              className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-200 ${videoOn ? 'bg-gray-700 text-white hover:bg-gray-600' : 'bg-danger text-white'}`}
+              title={videoOn ? 'Turn off camera' : 'Turn on camera'}
+            >
               {videoOn ? <VideoIcon className="w-5 h-5" /> : <VideoOff className="w-5 h-5" />}
             </button>
-            <button className="w-12 h-12 rounded-2xl bg-gray-700 text-white hover:bg-gray-600 flex items-center justify-center transition-all hidden sm:flex" title="Share screen">
+            <button
+              className="w-12 h-12 rounded-2xl bg-gray-700 text-white hover:bg-gray-600 hidden sm:flex items-center justify-center transition-all"
+              title="Share screen"
+            >
               <Monitor className="w-5 h-5" />
             </button>
           </div>
 
           {/* End Call */}
-          <button onClick={handleEndCall} className="w-14 h-14 rounded-2xl bg-danger text-white hover:bg-red-600 flex items-center justify-center transition-all shadow-soft-lg hover:shadow-soft-xl" title="End session">
+          <button
+            onClick={handleEndCall}
+            className="w-14 h-14 rounded-2xl bg-danger text-white hover:bg-red-600 flex items-center justify-center transition-all shadow-soft-lg hover:shadow-soft-xl"
+            title="End session"
+          >
             <PhoneOff className="w-6 h-6" />
           </button>
 
           {/* Right Controls */}
           <div className="flex items-center gap-2">
-            <button onClick={() => { setShowChat(!showChat); setShowQuestionnaire(false); }} className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-200 ${showChat ? 'bg-primary text-white' : 'bg-gray-700 text-white hover:bg-gray-600'}`} title="Chat">
+            <button
+              onClick={() => { setShowChat(!showChat); setShowQuestionnaire(false); setUnreadCount(0); }}
+              className={`relative w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-200 ${showChat ? 'bg-primary text-white' : 'bg-gray-700 text-white hover:bg-gray-600'}`}
+              title="Chat"
+            >
               <MessageSquare className="w-5 h-5" />
+              {unreadCount > 0 && !showChat && (
+                <span className="absolute -top-1 -right-1 w-5 h-5 bg-danger text-white text-xs rounded-full flex items-center justify-center font-bold">
+                  {unreadCount}
+                </span>
+              )}
             </button>
-            <button onClick={() => { setShowQuestionnaire(!showQuestionnaire); setShowChat(false); }} className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-200 ${showQuestionnaire ? 'bg-primary text-white' : 'bg-gray-700 text-white hover:bg-gray-600'}`} title="Questionnaire">
+            <button
+              onClick={() => { setShowQuestionnaire(!showQuestionnaire); setShowChat(false); }}
+              className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-200 ${showQuestionnaire ? 'bg-primary text-white' : 'bg-gray-700 text-white hover:bg-gray-600'}`}
+              title="Questionnaire"
+            >
               <ClipboardList className="w-5 h-5" />
             </button>
           </div>
