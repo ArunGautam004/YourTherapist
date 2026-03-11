@@ -39,11 +39,33 @@ const PatientDashboard = () => {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [aptsRes, moodRes] = await Promise.all([
-          appointmentAPI.getAll({ status: 'scheduled' }).catch(() => ({ data: { appointments: [] } })),
+        const [historyRes, moodRes] = await Promise.all([
+          sessionAPI.getMyHistory().catch(() => ({ data: { sessions: [] } })),
           moodAPI.getEntries(7).catch(() => ({ data: { entries: [], stats: {} } })),
         ]);
-        setAppointments(aptsRes.data.appointments?.slice(0, 3) || []);
+        
+        const allApts = (historyRes.data.sessions || []).map(s => s.appointment);
+        
+        // Filter for upcoming or ongoing
+        const activeApts = allApts.filter(apt => {
+          if (apt.status === 'cancelled' || apt.status === 'completed' || apt.status === 'no-show') return false;
+          const aptDate = new Date(apt.date || Date.now());
+          const timeStr = String(apt.time || '12:00 PM').toUpperCase();
+          let tH = 12, tM = 0;
+          const timeMatch = timeStr.match(/(\d+):?(\d+)?/);
+          if (timeMatch) {
+              tH = parseInt(timeMatch[1], 10);
+              tM = parseInt(timeMatch[2] || '0', 10);
+          }
+          if (timeStr.includes('PM') && tH < 12) tH += 12;
+          if (timeStr.includes('AM') && tH === 12) tH = 0;
+          aptDate.setHours(tH, tM, 0, 0);
+          
+          const endTime = new Date(aptDate.getTime() + (apt.duration || 50) * 60000);
+          return new Date() < endTime;
+        }).sort((a,b) => new Date(a.date) - new Date(b.date));
+
+        setAppointments(activeApts.slice(0, 3));
         setMoodData(moodRes.data || { entries: [], stats: {} });
       } catch (err) {
         console.error('Dashboard load error:', err);
@@ -178,13 +200,13 @@ const PatientDashboard = () => {
                       const localM = safeDate.getMonth();
                       const localD = safeDate.getDate();
 
-                      const [tPart, tPeriod] = (apt.time || '').split(' ');
-                      let [tH, tM] = (tPart || '0:0').split(':').map(Number);
-                      if (tPeriod === 'PM' && tH !== 12) tH += 12;
-                      if (tPeriod === 'AM' && tH === 12) tH = 0;
-
-                      aptDate = new Date(localY, localM, localD, tH, tM || 0, 0, 0);
-                      endTime = new Date(aptDate.getTime() + (apt.duration || 50) * 60000);
+                          const [timeStr, period] = (apt.time || '12:00 PM').split(' ');
+                          let [h, m] = timeStr.split(':').map(Number);
+                          if (period === 'PM' && h !== 12) h += 12;
+                          if (period === 'AM' && h === 12) h = 0;
+              
+                          aptDate = new Date(localY, localM, localD, h, m || 0, 0, 0);
+                          endTime = new Date(aptDate.getTime() + (apt.duration || 50) * 60000);
                     }
 
                     const now = new Date();

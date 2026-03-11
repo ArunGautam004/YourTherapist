@@ -207,8 +207,8 @@ export const getAppointments = async (req, res, next) => {
     }
 
     if (status) filter.status = status;
-    // Only show paid appointments (or include pending for the user who just booked)
-    filter.paymentStatus = 'paid';
+    // Filter out failed payments unless we want to see them. Allowing 'paid' and 'pending' covers most actual bookings.
+    filter.paymentStatus = { $in: ['paid', 'pending'] };
 
     const appointments = await Appointment.find(filter)
       .populate('doctor', 'name specialization profilePic rating')
@@ -284,7 +284,7 @@ export const getTodayAppointments = async (req, res, next) => {
       doctor: req.user._id,
       date: { $gte: today, $lt: tomorrow },
       status: { $nin: ['cancelled'] },
-      paymentStatus: 'paid',
+      paymentStatus: { $in: ['paid', 'pending'] },
     })
       .populate('patient', 'name email phone profilePic')
       .sort({ time: 1 });
