@@ -35,8 +35,8 @@ const Contact = () => {
 
   const contactInfo = [
     { icon: Mail, label: 'Email Us', value: 'hello@yourtherapist.com', desc: 'We reply within 24 hours' },
-    { icon: Phone, label: 'Call Us', value: '+91 98765 43210', desc: 'Mon-Sat, 9 AM - 6 PM IST' },
-    { icon: MapPin, label: 'Visit Us', value: 'Mumbai, Maharashtra', desc: 'India' },
+    { icon: Phone, label: 'Call Us', value: '+91 7206086301', desc: 'Mon-Sat, 9 AM - 6 PM IST' },
+    { icon: MapPin, label: 'Visit Us', value: 'New Delhi', desc: 'India' },
     { icon: Clock, label: 'Working Hours', value: 'Mon - Sat', desc: '9:00 AM - 6:00 PM IST' },
   ];
 
@@ -152,12 +152,12 @@ const Contact = () => {
                   <li className="flex items-center gap-2 text-text-primary font-medium">
                     <Phone className="w-4 h-4 text-danger" /> Call: 7206086301
                   </li>
-                  <li className="flex items-center gap-2 text-text-primary font-medium">
+                  {/* <li className="flex items-center gap-2 text-text-primary font-medium">
                     <Phone className="w-4 h-4 text-danger" /> Vandrevala Foundation: 1860-2662-345
-                  </li>
-                  <li className="flex items-center gap-2 text-text-primary font-medium">
+                  </li> */}
+                  {/* <li className="flex items-center gap-2 text-text-primary font-medium">
                     <Phone className="w-4 h-4 text-danger" /> AASRA: 9820466626
-                  </li>
+                  </li> */}
                 </ul>
               </div>
             </motion.div>

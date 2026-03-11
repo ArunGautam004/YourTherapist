@@ -30,6 +30,7 @@ const Questionnaires = () => {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [showBuilder, setShowBuilder] = useState(false);
+    const [editingId, setEditingId] = useState(null);
     const [expandedTemplate, setExpandedTemplate] = useState(null);
     const [totalUnread, setTotalUnread] = useState(0);
 
@@ -110,6 +111,32 @@ const Questionnaires = () => {
         setForm({ ...form, questions: qs });
     };
 
+    const handleEdit = (tmpl, e) => {
+        e.stopPropagation();
+        setForm({
+            title: tmpl.title || '',
+            description: tmpl.description || '',
+            diseaseName: tmpl.diseaseName || '',
+            testName: tmpl.testName || '',
+            answerType: tmpl.answerType || 'objective',
+            category: tmpl.category || 'assessment',
+            questions: tmpl.questions?.length ? tmpl.questions : [{ text: '', type: 'choice', options: ['', ''], required: true }],
+        });
+        setEditingId(tmpl._id);
+        setShowBuilder(true);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    const handleCancel = () => {
+        setShowBuilder(false);
+        setEditingId(null);
+        setForm({
+            title: '', description: '', diseaseName: '', testName: '',
+            answerType: 'objective', category: 'assessment',
+            questions: [{ text: '', type: 'choice', options: ['', ''], required: true }],
+        });
+    };
+
     const handleSave = async () => {
         if (!form.title.trim() || !form.diseaseName.trim()) {
             toast.error('Title and Disease Name are required');
@@ -133,19 +160,34 @@ const Questionnaires = () => {
                 return { ...q, options: q.options.filter(o => o.trim()) };
             });
 
-            await sessionAPI.createTemplate({ ...form, questions: cleanQuestions });
-            toast.success('Questionnaire created! 🎉');
-            setShowBuilder(false);
-            setForm({
-                title: '', description: '', diseaseName: '', testName: '',
-                answerType: 'objective', category: 'assessment',
-                questions: [{ text: '', type: 'choice', options: ['', ''], required: true }],
-            });
+            if (editingId) {
+                await sessionAPI.updateTemplate(editingId, { ...form, questions: cleanQuestions });
+                toast.success('Questionnaire updated! 🎉');
+            } else {
+                await sessionAPI.createTemplate({ ...form, questions: cleanQuestions });
+                toast.success('Questionnaire created! 🎉');
+            }
+            
+            handleCancel();
             fetchTemplates();
         } catch (err) {
             toast.error(err.response?.data?.message || 'Failed to save questionnaire');
         } finally {
             setSaving(false);
+        }
+    };
+
+    const handleDelete = async (id, e) => {
+        e.stopPropagation();
+        if (!window.confirm('Are you sure you want to delete this questionnaire? This cannot be undone.')) return;
+        
+        try {
+            await sessionAPI.deleteTemplate(id);
+            toast.success('Questionnaire deleted! 🗑️');
+            if (expandedTemplate === id) setExpandedTemplate(null);
+            fetchTemplates();
+        } catch (err) {
+            toast.error(err.response?.data?.message || 'Failed to delete questionnaire');
         }
     };
 
@@ -165,7 +207,13 @@ const Questionnaires = () => {
                             <p className="text-text-secondary mt-1">Create and manage disease-specific questionnaires</p>
                         </div>
                         <button
-                            onClick={() => setShowBuilder(!showBuilder)}
+                            onClick={() => {
+                                if (showBuilder) {
+                                    handleCancel();
+                                } else {
+                                    setShowBuilder(true);
+                                }
+                            }}
                             className="btn-primary flex items-center gap-2 self-start"
                         >
                             {showBuilder ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
@@ -185,7 +233,7 @@ const Questionnaires = () => {
                                 <div className="card border-2 border-primary/20">
                                     <h3 className="font-display font-bold text-lg text-text-primary mb-5 flex items-center gap-2">
                                         <Edit3 className="w-5 h-5 text-primary" />
-                                        New Questionnaire
+                                        {editingId ? 'Edit Questionnaire' : 'New Questionnaire'}
                                     </h3>
 
                                     {/* Meta fields */}
@@ -330,7 +378,7 @@ const Questionnaires = () => {
                                     </div>
 
                                     <div className="flex justify-end gap-3 mt-6 pt-5 border-t border-gray-100">
-                                        <button onClick={() => setShowBuilder(false)} className="btn-outline">Cancel</button>
+                                        <button onClick={handleCancel} className="btn-outline">Cancel</button>
                                         <button onClick={handleSave} disabled={saving} className="btn-primary flex items-center gap-2">
                                             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                                             {saving ? 'Saving...' : 'Save Questionnaire'}
@@ -368,7 +416,23 @@ const Questionnaires = () => {
                                                 </div>
                                             </div>
                                         </div>
-                                        {expandedTemplate === tmpl._id ? <ChevronUp className="w-5 h-5 text-text-secondary" /> : <ChevronDown className="w-5 h-5 text-text-secondary" />}
+                                        <div className="flex items-center gap-3">
+                                            <button 
+                                                onClick={(e) => handleEdit(tmpl, e)}
+                                                className="p-2 text-text-secondary hover:text-primary hover:bg-primary/10 rounded-lg transition-colors"
+                                                title="Edit Questionnaire"
+                                            >
+                                                <Edit3 className="w-4 h-4" />
+                                            </button>
+                                            <button 
+                                                onClick={(e) => handleDelete(tmpl._id, e)}
+                                                className="p-2 text-text-secondary hover:text-danger hover:bg-danger/10 rounded-lg transition-colors"
+                                                title="Delete Questionnaire"
+                                            >
+                                                <Trash2 className="w-4 h-4" />
+                                            </button>
+                                            {expandedTemplate === tmpl._id ? <ChevronUp className="w-5 h-5 text-text-secondary" /> : <ChevronDown className="w-5 h-5 text-text-secondary" />}
+                                        </div>
                                     </div>
 
                                     <AnimatePresence>

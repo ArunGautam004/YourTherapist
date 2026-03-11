@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useSearchParams } from 'react-router-dom';
 import {
   LayoutDashboard, Users, Calendar, BarChart3, MessageCircle, Settings,
   Search, AlertTriangle, TrendingUp, TrendingDown, Minus,
@@ -10,6 +11,7 @@ import Sidebar from '../../components/layout/Sidebar';
 import { patientAPI, sessionAPI, messageAPI } from '../../services/api';
 
 const AdminPatients = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
   const [filterRisk, setFilterRisk] = useState('all');
   const [selectedPatient, setSelectedPatient] = useState(null);
@@ -17,7 +19,7 @@ const AdminPatients = () => {
   const [patientDetail, setPatientDetail] = useState(null);
   const [loading, setLoading] = useState(true);
   const [totalUnread, setTotalUnread] = useState(0);
-  // Session detail states
+
   const [expandedApt, setExpandedApt] = useState(null);
   const [aptDetail, setAptDetail] = useState({});
   const [aptDetailLoading, setAptDetailLoading] = useState(null);
@@ -49,15 +51,26 @@ const AdminPatients = () => {
       setPatients(data.patients || []);
       const unread = (msgData.conversations || []).reduce((sum, c) => sum + (c.unreadCount || 0), 0);
       setTotalUnread(unread);
+      return data.patients || [];
     } catch (err) {
       console.error(err);
+      return [];
     } finally {
       setLoading(false);
     }
   };
 
+  // ✅ On mount: fetch patients, then auto-select if ?selected= param exists
   useEffect(() => {
-    fetchPatients();
+    const autoSelectId = searchParams.get('selected');
+    fetchPatients().then((fetchedPatients) => {
+      if (autoSelectId && fetchedPatients.length > 0) {
+        const match = fetchedPatients.find(p => p._id === autoSelectId);
+        if (match) {
+          handleSelectPatient(match);
+        }
+      }
+    });
   }, []);
 
   useEffect(() => {
@@ -68,6 +81,8 @@ const AdminPatients = () => {
     setSelectedPatient(patient);
     setExpandedApt(null);
     setAptDetail({});
+    // Update URL so it's shareable / back-navigable
+    setSearchParams({ selected: patient._id });
     try {
       const { data } = await patientAPI.getById(patient._id);
       setPatientDetail(data);
@@ -76,13 +91,19 @@ const AdminPatients = () => {
     }
   };
 
+  const handleBackToList = () => {
+    setSelectedPatient(null);
+    setPatientDetail(null);
+    setSearchParams({});
+  };
+
   const handleExpandApt = async (aptId) => {
     if (expandedApt === aptId) {
       setExpandedApt(null);
       return;
     }
     setExpandedApt(aptId);
-    if (aptDetail[aptId]) return; // already loaded
+    if (aptDetail[aptId]) return;
     setAptDetailLoading(aptId);
     try {
       const { data } = await sessionAPI.getSessionDetail(aptId);
@@ -113,7 +134,6 @@ const AdminPatients = () => {
         });
       }
       toast.success('Report saved!');
-      // Refresh detail
       const { data } = await sessionAPI.getSessionDetail(aptId);
       setAptDetail(prev => ({ ...prev, [aptId]: data }));
       setReportText('');
@@ -143,18 +163,18 @@ const AdminPatients = () => {
   const getAptDisplayStatus = (apt) => {
     if (apt.status === 'cancelled') return { label: 'Cancelled', style: 'bg-gray-100 text-gray-500' };
     if (apt.status === 'completed') return { label: 'Ended', style: 'bg-success/10 text-success' };
-    
+
     const aptDate = new Date(apt.date);
-    const [timeStr, modifier] = apt.time.split(' ');
+    const [timeStr, modifier] = (apt.time || '12:00 PM').split(' ');
     let [hours, minutes] = timeStr.split(':');
     hours = parseInt(hours, 10);
     if (hours === 12) hours = 0;
     if (modifier === 'PM') hours += 12;
-    
-    aptDate.setHours(hours, parseInt(minutes, 10), 0, 0);
+
+    aptDate.setHours(hours, parseInt(minutes || 0, 10), 0, 0);
     const now = new Date();
     const endTime = new Date(aptDate.getTime() + (apt.duration || 50) * 60000);
-    
+
     if (now < aptDate) return { label: 'Upcoming', style: 'bg-primary/10 text-primary' };
     if (now >= aptDate && now <= endTime) return { label: 'Ongoing', style: 'bg-warning/10 text-warning animate-pulse' };
     return { label: 'Ended', style: 'bg-gray-100 text-text-secondary' };
@@ -214,7 +234,10 @@ const AdminPatients = () => {
 
           {selectedPatient ? (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-              <button onClick={() => { setSelectedPatient(null); setPatientDetail(null); }} className="text-sm text-primary font-medium hover:text-primary-dark flex items-center gap-1">
+              <button
+                onClick={handleBackToList}
+                className="text-sm text-primary font-medium hover:text-primary-dark flex items-center gap-1"
+              >
                 ← Back to all patients
               </button>
               <div className="grid lg:grid-cols-3 gap-6">
@@ -233,8 +256,8 @@ const AdminPatients = () => {
                     <div className="flex items-center justify-center gap-2 mt-2">
                       {isEditingRisk ? (
                         <div className="flex items-center gap-1">
-                          <select 
-                            value={editRisk} 
+                          <select
+                            value={editRisk}
                             onChange={(e) => setEditRisk(e.target.value)}
                             className="text-xs p-1 border rounded"
                           >
@@ -243,8 +266,8 @@ const AdminPatients = () => {
                             <option value="high">High Risk</option>
                             <option value="critical">Critical Risk</option>
                           </select>
-                          <button onClick={() => handleUpdatePatient('riskLevel', editRisk)} disabled={savingPatient} className="text-success"><Check className="w-4 h-4"/></button>
-                          <button onClick={() => setIsEditingRisk(false)} className="text-text-secondary"><X className="w-4 h-4"/></button>
+                          <button onClick={() => handleUpdatePatient('riskLevel', editRisk)} disabled={savingPatient} className="text-success"><Check className="w-4 h-4" /></button>
+                          <button onClick={() => setIsEditingRisk(false)} className="text-text-secondary"><X className="w-4 h-4" /></button>
                         </div>
                       ) : (
                         <div className="flex items-center gap-2">
@@ -269,11 +292,11 @@ const AdminPatients = () => {
                         )}
                       </div>
                       {isEditingDiagnosis ? (
-                         <div className="flex items-center gap-1 mt-1">
-                           <input type="text" value={editDiagnosis} onChange={e => setEditDiagnosis(e.target.value)} className="flex-1 text-sm p-1 border rounded" autoFocus />
-                           <button onClick={() => handleUpdatePatient('diagnosis', editDiagnosis)} disabled={savingPatient} className="text-success"><Check className="w-4 h-4"/></button>
-                           <button onClick={() => setIsEditingDiagnosis(false)} className="text-text-secondary"><X className="w-4 h-4"/></button>
-                         </div>
+                        <div className="flex items-center gap-1 mt-1">
+                          <input type="text" value={editDiagnosis} onChange={e => setEditDiagnosis(e.target.value)} className="flex-1 text-sm p-1 border rounded" autoFocus />
+                          <button onClick={() => handleUpdatePatient('diagnosis', editDiagnosis)} disabled={savingPatient} className="text-success"><Check className="w-4 h-4" /></button>
+                          <button onClick={() => setIsEditingDiagnosis(false)} className="text-text-secondary"><X className="w-4 h-4" /></button>
+                        </div>
                       ) : (
                         <p className="text-sm font-medium text-text-primary mt-0.5">{selectedPatient.diagnosis || 'Not assessed yet'}</p>
                       )}
@@ -295,7 +318,6 @@ const AdminPatients = () => {
 
                 {/* Session & Note History */}
                 <div className="lg:col-span-2 space-y-6">
-                  {/* Appointment History */}
                   <div className="card">
                     <h3 className="font-display font-bold text-lg text-text-primary mb-5">Appointment History</h3>
                     <div className="overflow-x-auto">
@@ -341,15 +363,16 @@ const AdminPatients = () => {
                                     {isLoading ? (
                                       <Loader2 className="w-4 h-4 animate-spin text-primary ml-auto" />
                                     ) : (
-                                      <button 
+                                      <button
                                         onClick={(e) => { e.stopPropagation(); handleExpandApt(aptId); }}
                                         className="text-xs font-semibold text-primary bg-primary/10 px-3 py-1.5 rounded-lg hover:bg-primary/20 transition-colors inline-flex items-center justify-center gap-1 ml-auto"
                                       >
-                                        View Details {isExpanded ? <ChevronUp className="w-3 h-3"/> : <ChevronDown className="w-3 h-3"/>}
+                                        Details {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                                       </button>
                                     )}
                                   </td>
                                 </tr>
+
                                 {isExpanded && (
                                   <tr key={`${aptId}-detail`}>
                                     <td colSpan="4" className="p-4 bg-gray-50/50">
@@ -359,15 +382,17 @@ const AdminPatients = () => {
                                         </div>
                                       ) : detail ? (
                                         <div className="space-y-4">
-                                          {/* Session Description */}
+                                          {/* Session Description (auto-saved during call) */}
                                           <div>
                                             <h5 className="text-sm font-semibold text-text-primary mb-2 flex items-center gap-1">
-                                              <FileText className="w-4 h-4 text-primary" /> Session Description
+                                              <FileText className="w-4 h-4 text-primary" /> Session Notes
                                             </h5>
                                             {detail.sessionNote?.sessionDescription ? (
-                                              <p className="text-sm text-text-secondary bg-white p-3 rounded-xl">{detail.sessionNote.sessionDescription}</p>
+                                              <p className="text-sm text-text-secondary bg-white p-3 rounded-xl border border-gray-100">
+                                                {detail.sessionNote.sessionDescription}
+                                              </p>
                                             ) : (
-                                              <p className="text-xs text-text-secondary italic">No description</p>
+                                              <p className="text-xs text-text-secondary italic">No session notes recorded.</p>
                                             )}
                                           </div>
 
@@ -377,7 +402,9 @@ const AdminPatients = () => {
                                               <FileText className="w-4 h-4 text-primary" /> Report
                                             </h5>
                                             {detail.sessionNote?.report ? (
-                                              <p className="text-sm text-text-secondary bg-green-50 p-3 rounded-xl border border-green-200">{detail.sessionNote.report}</p>
+                                              <p className="text-sm text-text-secondary bg-green-50 p-3 rounded-xl border border-green-200">
+                                                {detail.sessionNote.report}
+                                              </p>
                                             ) : (
                                               <div className="space-y-2">
                                                 <textarea
@@ -393,35 +420,43 @@ const AdminPatients = () => {
                                                   className="btn-primary text-sm flex items-center gap-1 !py-2"
                                                 >
                                                   {savingReport ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
-                                                  Create Report
+                                                  Save Report
                                                 </button>
                                               </div>
                                             )}
                                           </div>
 
                                           {/* Questionnaire Responses */}
-                                          <div className="mt-4 pt-4 border-t border-gray-100">
+                                          <div className="pt-4 border-t border-gray-100">
                                             <h5 className="text-sm font-semibold text-text-primary mb-3 flex items-center gap-1">
                                               <ClipboardList className="w-4 h-4 text-primary" /> Questionnaire Responses
                                             </h5>
                                             {detail.questionnaireResponses?.length > 0 ? (
                                               <div className="space-y-3">
                                                 {detail.questionnaireResponses.map((qr, qi) => (
-                                                  <div key={qi} className="bg-gray-50 p-4 rounded-xl border border-gray-100">
+                                                  <div key={qi} className="bg-purple-50 p-4 rounded-xl border border-purple-100">
                                                     <div className="flex items-center justify-between mb-3">
                                                       <div>
-                                                          <p className="text-sm font-bold text-primary">{qr.template?.title || 'Questionnaire'}</p>
-                                                          {qr.template?.diseaseName && <span className="text-xs text-text-secondary">{qr.template.diseaseName}</span>}
+                                                        <p className="text-sm font-bold text-purple-700">{qr.template?.title || 'Questionnaire'}</p>
+                                                        {qr.template?.diseaseName && (
+                                                          <span className="text-xs text-purple-500">{qr.template.diseaseName}</span>
+                                                        )}
                                                       </div>
-                                                      {qr.totalScore > 0 && <span className="text-sm font-bold bg-primary/10 text-primary px-3 py-1 rounded-lg">Score: {qr.totalScore}</span>}
+                                                      {qr.totalScore > 0 && (
+                                                        <span className="text-sm font-bold bg-purple-100 text-purple-700 px-3 py-1 rounded-lg">
+                                                          Score: {qr.totalScore}
+                                                        </span>
+                                                      )}
                                                     </div>
                                                     <div className="space-y-2">
                                                       {(qr.responses || []).map((r, ri) => (
-                                                        <div key={ri} className="bg-white p-3 rounded-lg border border-gray-100 shadow-sm">
+                                                        <div key={ri} className="bg-white p-3 rounded-lg border border-purple-100">
                                                           <p className="text-xs text-text-secondary mb-1">{r.questionText}</p>
                                                           <p className="text-sm font-medium text-text-primary break-words">
                                                             {r.type === 'image' && typeof r.answer === 'string' && r.answer.startsWith('http') ? (
-                                                              <a href={r.answer} target="_blank" rel="noreferrer" className="text-primary hover:underline">View Uploaded Image</a>
+                                                              <a href={r.answer} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                                                                View Uploaded Image
+                                                              </a>
                                                             ) : r.answer}
                                                           </p>
                                                         </div>
@@ -466,6 +501,9 @@ const AdminPatients = () => {
                               {note.progressStatus || 'Initial'}
                             </span>
                           </div>
+                          {note.sessionDescription && (
+                            <p className="text-sm text-text-secondary leading-relaxed mb-1">{note.sessionDescription}</p>
+                          )}
                           {note.assessment && <p className="text-sm text-text-secondary leading-relaxed mb-1">{note.assessment}</p>}
                           {note.plan && <p className="text-sm text-text-secondary leading-relaxed">{note.plan}</p>}
                         </div>
@@ -493,11 +531,13 @@ const AdminPatients = () => {
                   onClick={() => handleSelectPatient(patient)}
                 >
                   <div className="flex items-center gap-3 mb-4">
-                    <div className="w-12 h-12 rounded-xl bg-primary-light flex items-center justify-center text-2xl flex-shrink-0">
-                      👤
+                    <div className="w-12 h-12 rounded-xl bg-primary-light flex items-center justify-center text-2xl flex-shrink-0 overflow-hidden">
+                      {patient.profilePic ? (
+                        <img src={patient.profilePic} alt={patient.name} className="w-full h-full object-cover" />
+                      ) : '👤'}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-text-primary truncate">{patient.name}</p>
+                      <p className="font-semibold text-text-primary truncate group-hover:text-primary transition-colors">{patient.name}</p>
                       <p className="text-xs text-text-secondary">{patient.gender || ''} • {patient.sessions || 0} sessions</p>
                     </div>
                     <span className={`text-xs px-2 py-1 rounded-full font-medium ${getRiskBadge(patient.riskLevel)}`}>

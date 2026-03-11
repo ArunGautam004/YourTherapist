@@ -2,369 +2,302 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import {
-    LayoutDashboard, Calendar, BookOpen, MessageCircle, Settings,
-    Video, Clock, X, FileText, ClipboardList, ChevronRight, Loader2
+  LayoutDashboard, Calendar, BookOpen, MessageCircle, Settings,
+  Clock, FileText, ClipboardList, ChevronDown, ChevronUp,
+  Video, CheckCircle2, XCircle, Loader2, AlertCircle, User
 } from 'lucide-react';
 import Sidebar from '../../components/layout/Sidebar';
 import { useAuth } from '../../context/AuthContext';
-import { appointmentAPI, sessionAPI } from '../../services/api';
-
-const fadeInUp = {
-    hidden: { opacity: 0, y: 20 },
-    visible: { opacity: 1, y: 0, transition: { duration: 0.5 } },
-};
-
-const stagger = {
-    hidden: {},
-    visible: { transition: { staggerChildren: 0.1 } },
-};
+import { sessionAPI } from '../../services/api';
 
 const patientLinks = [
-    { name: 'Dashboard', path: '/patient/dashboard', icon: LayoutDashboard },
-    { name: 'My Sessions', path: '/patient/sessions', icon: Clock },
-    { name: 'Book Appointment', path: '/patient/book', icon: Calendar },
-    { name: 'Mood Journal', path: '/patient/journal', icon: BookOpen },
-    { name: 'Messages', path: '/patient/messages', icon: MessageCircle },
-    { name: 'Settings', path: '/patient/settings', icon: Settings },
+  { name: 'Dashboard', path: '/patient/dashboard', icon: LayoutDashboard },
+  { name: 'My Sessions', path: '/patient/sessions', icon: Clock },
+  { name: 'Book Appointment', path: '/patient/book', icon: Calendar },
+  { name: 'Mood Journal', path: '/patient/journal', icon: BookOpen },
+  { name: 'Messages', path: '/patient/messages', icon: MessageCircle },
+  { name: 'Settings', path: '/patient/settings', icon: Settings },
 ];
 
+const statusConfig = {
+  completed: { label: 'Completed', style: 'bg-success/10 text-success', icon: CheckCircle2 },
+  cancelled: { label: 'Cancelled', style: 'bg-gray-100 text-gray-400', icon: XCircle },
+  scheduled: { label: 'Upcoming', style: 'bg-primary/10 text-primary', icon: Clock },
+  'no-show': { label: 'No Show', style: 'bg-danger/10 text-danger', icon: AlertCircle },
+};
+
 const PatientSessions = () => {
-    const { user } = useAuth();
-    const [appointments, setAppointments] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [selectedSession, setSelectedSession] = useState(null);
-    const [sessionDetail, setSessionDetail] = useState(null);
-    const [detailLoading, setDetailLoading] = useState(false);
+  const { user } = useAuth();
+  const [sessions, setSessions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [expandedId, setExpandedId] = useState(null);
+  const [filter, setFilter] = useState('all'); // all | completed | upcoming
 
-    useEffect(() => {
-        const fetchAppointments = async () => {
-            try {
-                setLoading(true);
-                const res = await appointmentAPI.getAll();
-                setAppointments(res.data.appointments || []);
-            } catch (err) {
-                console.error('Failed to load appointments:', err);
-            } finally {
-                setLoading(false);
-            }
-        };
-        fetchAppointments();
-    }, []);
-
-    const handleViewDetail = async (apt) => {
-        setSelectedSession(apt);
-        setDetailLoading(true);
-        try {
-            const { data } = await sessionAPI.getSessionDetail(apt._id);
-            setSessionDetail(data);
-        } catch (err) {
-            console.error('Failed to load session detail:', err);
-            setSessionDetail(null);
-        } finally {
-            setDetailLoading(false);
-        }
+  useEffect(() => {
+    const fetchHistory = async () => {
+      try {
+        const { data } = await sessionAPI.getMyHistory();
+        setSessions(data.sessions || []);
+      } catch (err) {
+        console.error('Failed to load session history:', err);
+      } finally {
+        setLoading(false);
+      }
     };
+    fetchHistory();
+  }, []);
 
-    const sortedAppointments = [...appointments].map(apt => {
-        const safeDate = new Date(apt.date);
-        const isValidDate = !isNaN(safeDate);
+  const filteredSessions = sessions.filter((s) => {
+    const status = s.appointment?.status;
+    if (filter === 'completed') return status === 'completed';
+    if (filter === 'upcoming') return status === 'scheduled';
+    return true;
+  });
 
-        let aptDate = new Date();
-        let endTime = new Date();
-        if (isValidDate) {
-            const localY = safeDate.getFullYear();
-            const localM = safeDate.getMonth();
-            const localD = safeDate.getDate();
+  const getStatus = (apt) => {
+    return statusConfig[apt.status] || statusConfig.scheduled;
+  };
 
-            const [tPart, tPeriod] = (apt.time || '').split(' ');
-            let [tH, tM] = (tPart || '0:0').split(':').map(Number);
-            if (tPeriod === 'PM' && tH !== 12) tH += 12;
-            if (tPeriod === 'AM' && tH === 12) tH = 0;
+  const formatDate = (dateStr) => {
+    const d = new Date(dateStr);
+    return d.toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+  };
 
-            aptDate = new Date(localY, localM, localD, tH, tM || 0, 0, 0);
-            endTime = new Date(aptDate.getTime() + (apt.duration || 50) * 60000);
-        }
+  return (
+    <div className="min-h-screen bg-background">
+      <Sidebar links={patientLinks} userRole="patient" />
 
-        const now = new Date();
-        const diff = isValidDate ? (aptDate - now) / 60000 : Infinity;
+      <main className="lg:ml-[260px] pt-20 lg:pt-6 p-4 md:p-6 lg:p-8">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="max-w-4xl mx-auto"
+        >
+          {/* Header */}
+          <div className="mb-8">
+            <h1 className="font-display text-2xl md:text-3xl font-bold text-text-primary">
+              My <span className="gradient-text">Sessions</span>
+            </h1>
+            <p className="text-text-secondary mt-1">Your therapy session history, notes, and questionnaire responses.</p>
+          </div>
 
-        const isOngoing = isValidDate && diff <= 10 && now < endTime && apt.status !== 'cancelled';
-        const isPast = ['completed', 'cancelled', 'no-show'].includes(apt.status) || (isValidDate && now >= endTime);
+          {/* Filter Tabs */}
+          <div className="flex items-center gap-2 mb-6">
+            {[
+              { key: 'all', label: 'All Sessions' },
+              { key: 'completed', label: 'Completed' },
+              { key: 'upcoming', label: 'Upcoming' },
+            ].map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setFilter(tab.key)}
+                className={`px-4 py-2 rounded-xl text-sm font-medium transition-all
+                  ${filter === tab.key
+                    ? 'bg-primary text-white shadow-glow'
+                    : 'bg-white text-text-secondary hover:bg-gray-50 shadow-soft'
+                  }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
 
-        let displayStatus = 'Upcoming';
-        if (apt.status === 'cancelled') {
-            displayStatus = 'Cancelled';
-        } else if (isPast) {
-            displayStatus = apt.patientJoined ? 'Ended' : 'Expired';
-        } else if (isOngoing) {
-            displayStatus = 'Ongoing';
-        } else if (diff > 0 && diff <= 60) {
-            displayStatus = `In ${Math.ceil(diff)}m`;
-        } else if (diff > 60) {
-            displayStatus = `In ${Math.ceil(diff / 60) > 24 ? Math.ceil(diff / 1440) + 'd' : Math.ceil(diff / 60) + 'h'}`;
-        }
-
-        return { ...apt, aptDate, isValidDate, safeDate, diff, isOngoing, isPast, displayStatus };
-    }).sort((a, b) => {
-        return (a.aptDate.getTime() || 0) - (b.aptDate.getTime() || 0);
-    });
-
-    const renderAppointment = (apt) => (
-        <div key={apt._id} className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 rounded-2xl border border-gray-100 bg-gray-50/50 hover:bg-gray-50 transition-colors">
-            <div className="flex items-center gap-4 flex-1">
-                <div className="w-14 h-14 rounded-2xl bg-primary-light flex items-center justify-center flex-shrink-0">
-                    <span className="text-2xl">👨‍⚕️</span>
-                </div>
-                <div>
-                    <p className="font-semibold text-text-primary text-lg">{apt.doctor?.name || 'Dr. Therapist'}</p>
-                    <p className="text-sm text-text-secondary">{apt.doctor?.specialization || 'Clinical Psychologist'}</p>
-                </div>
+          {/* Session List */}
+          {loading ? (
+            <div className="flex items-center justify-center py-20">
+              <Loader2 className="w-8 h-8 animate-spin text-primary" />
             </div>
+          ) : filteredSessions.length === 0 ? (
+            <div className="card text-center py-16">
+              <Clock className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+              <p className="text-text-secondary font-medium">No sessions found</p>
+              <Link to="/patient/book" className="text-primary text-sm font-medium mt-2 inline-block hover:underline">
+                Book your first session →
+              </Link>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {filteredSessions.map(({ appointment: apt, sessionNote, questionnaireResponses }) => {
+                const status = getStatus(apt);
+                const StatusIcon = status.icon;
+                const isExpanded = expandedId === apt._id;
+                const hasNote = !!sessionNote?.sessionDescription;
+                const hasResponses = questionnaireResponses?.length > 0;
+                const hasContent = hasNote || hasResponses;
 
-            <div className="flex items-center gap-4 flex-wrap sm:flex-nowrap mt-2 sm:mt-0">
-                <div className="bg-white px-4 py-2 rounded-xl border border-gray-100 flex items-center gap-2">
-                    <Calendar className="w-4 h-4 text-primary" />
-                    <div className="text-sm font-medium">
-                        {apt.isValidDate ? apt.safeDate.toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown Date'}
-                    </div>
-                </div>
-                <div className="bg-white px-4 py-2 rounded-xl border border-gray-100 flex items-center gap-2">
-                    <Clock className="w-4 h-4 text-primary" />
-                    <div className="text-sm font-medium">{apt.time || 'TBD'}</div>
-                </div>
-
-                {apt.meetingLink && apt.isOngoing ? (
-                    <Link to={apt.meetingLink} className="btn-primary whitespace-nowrap !px-6 flex items-center gap-2">
-                        <Video className="w-4 h-4" /> Join Session
-                    </Link>
-                ) : apt.isPast && apt.displayStatus !== 'Cancelled' ? (
-                    <button
-                        onClick={() => handleViewDetail(apt)}
-                        className="px-4 py-2 rounded-xl bg-primary-light text-primary text-sm font-medium hover:bg-primary/10 transition-colors flex items-center gap-1"
+                return (
+                  <motion.div
+                    key={apt._id}
+                    layout
+                    className="card overflow-hidden"
+                  >
+                    {/* Session Row */}
+                    <div
+                      className={`flex items-center gap-4 ${hasContent ? 'cursor-pointer' : ''}`}
+                      onClick={() => hasContent && setExpandedId(isExpanded ? null : apt._id)}
                     >
-                        <FileText className="w-4 h-4" /> View Details
-                    </button>
-                ) : (
-                    <div className="w-[140px] flex justify-end">
-                        <span className={`text-sm font-medium px-4 py-2 rounded-xl text-center w-full ${apt.displayStatus === 'Cancelled' ? 'bg-danger/10 text-danger' :
-                            (apt.displayStatus === 'Ended' || apt.displayStatus === 'Expired') ? 'bg-gray-200 text-text-secondary' :
-                                apt.displayStatus === 'Ongoing' ? 'bg-success/10 text-success shadow-sm' :
-                                    'bg-primary-light text-primary'
-                            }`}>
-                            {apt.displayStatus}
-                        </span>
-                    </div>
-                )}
-            </div>
-        </div>
-    );
-
-    return (
-        <div className="min-h-screen bg-background">
-            <Sidebar links={patientLinks} userRole="patient" />
-
-            <main className="lg:ml-[260px] pt-20 lg:pt-6 p-4 md:p-6 lg:p-8">
-                <motion.div initial="hidden" animate="visible" variants={stagger} className="max-w-5xl mx-auto">
-                    {/* Header */}
-                    <motion.div variants={fadeInUp} className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
-                        <div>
-                            <h1 className="font-display text-2xl md:text-3xl font-bold text-text-primary">
-                                My <span className="gradient-text">Sessions</span>
-                            </h1>
-                            <p className="text-text-secondary mt-1">Manage your upcoming and past therapy sessions.</p>
-                        </div>
-
-                        <Link to="/patient/book" className="btn-primary flex items-center gap-2 self-start md:self-auto">
-                            <Calendar className="w-4 h-4" /> Book New Session
-                        </Link>
-                    </motion.div>
-
-                    <motion.div variants={fadeInUp} className="space-y-8">
-                        {loading ? (
-                            <div className="flex items-center justify-center py-12">
-                                <div className="w-8 h-8 border-3 border-primary border-t-transparent rounded-full animate-spin" />
-                            </div>
-                        ) : sortedAppointments.length > 0 ? (
-                            <>
-                                {/* ONGOING */}
-                                {sortedAppointments.filter((apt) => apt.isOngoing).length > 0 && (
-                                    <div className="card">
-                                        <h2 className="text-xl font-bold text-text-primary mb-4 flex items-center gap-2">
-                                            <div className="w-2 h-2 rounded-full bg-success animate-pulse" />
-                                            Ongoing Session
-                                        </h2>
-                                        <div className="space-y-4">
-                                            {sortedAppointments.filter((apt) => apt.isOngoing).map(renderAppointment)}
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* UPCOMING */}
-                                {sortedAppointments.filter((apt) => !apt.isPast && !apt.isOngoing).length > 0 && (
-                                    <div className="card">
-                                        <h2 className="text-xl font-bold text-text-primary mb-4 flex items-center gap-2">
-                                            <Calendar className="w-5 h-5 text-primary" />
-                                            Upcoming Sessions
-                                        </h2>
-                                        <div className="space-y-4">
-                                            {sortedAppointments.filter((apt) => !apt.isPast && !apt.isOngoing).map(renderAppointment)}
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* ENDED */}
-                                {sortedAppointments.filter((apt) => apt.isPast).length > 0 && (
-                                    <div className="card">
-                                        <h2 className="text-xl font-bold text-text-primary mb-4">
-                                            Past Sessions
-                                        </h2>
-                                        <div className="space-y-4">
-                                            {sortedAppointments.filter((apt) => apt.isPast).reverse().map(renderAppointment)}
-                                        </div>
-                                    </div>
-                                )}
-                            </>
+                      {/* Doctor Avatar */}
+                      <div className="w-12 h-12 rounded-2xl bg-primary-light flex items-center justify-center flex-shrink-0 overflow-hidden">
+                        {apt.doctor?.profilePic ? (
+                          <img src={apt.doctor.profilePic} alt={apt.doctor.name} className="w-full h-full object-cover" />
                         ) : (
-                            <div className="card text-center py-12">
-                                <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-4">
-                                    <Calendar className="w-8 h-8 text-gray-400" />
-                                </div>
-                                <h3 className="text-lg font-semibold text-text-primary mb-1">No sessions found</h3>
-                                <p className="text-text-secondary text-sm max-w-sm mx-auto mb-6">You don't have any therapy sessions scheduled.</p>
-                                <Link to="/patient/book" className="btn-primary inline-flex">Book a Session</Link>
-                            </div>
+                          <User className="w-6 h-6 text-primary" />
                         )}
-                    </motion.div>
-                </motion.div>
-            </main>
+                      </div>
 
-            {/* Session Detail Modal */}
-            <AnimatePresence>
-                {selectedSession && (
-                    <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-                        onClick={() => { setSelectedSession(null); setSessionDetail(null); }}
-                    >
-                        <motion.div
-                            initial={{ scale: 0.95, opacity: 0 }}
-                            animate={{ scale: 1, opacity: 1 }}
-                            exit={{ scale: 0.95, opacity: 0 }}
-                            className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-xl"
+                      {/* Info */}
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-text-primary truncate">
+                          {apt.doctor?.name
+                            ? (apt.doctor.name.toLowerCase().startsWith('dr') ? apt.doctor.name : `Dr. ${apt.doctor.name}`)
+                            : 'Doctor'}
+                        </p>
+                        <p className="text-xs text-text-secondary mt-0.5">
+                          {apt.doctor?.specialization || 'Therapist'} • {formatDate(apt.date)} at {apt.time}
+                        </p>
+                        {/* Badges */}
+                        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                          {hasNote && (
+                            <span className="flex items-center gap-1 text-[11px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-medium">
+                              <FileText className="w-3 h-3" /> Session Note
+                            </span>
+                          )}
+                          {hasResponses && (
+                            <span className="flex items-center gap-1 text-[11px] bg-purple-50 text-purple-600 px-2 py-0.5 rounded-full font-medium">
+                              <ClipboardList className="w-3 h-3" /> {questionnaireResponses.length} Questionnaire{questionnaireResponses.length > 1 ? 's' : ''}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Status + Expand */}
+                      <div className="flex items-center gap-3 flex-shrink-0">
+                        <span className={`hidden sm:flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full ${status.style}`}>
+                          <StatusIcon className="w-3.5 h-3.5" />
+                          {status.label}
+                        </span>
+                        {apt.meetingLink && apt.status === 'scheduled' && (
+                          <Link
+                            to={apt.meetingLink}
                             onClick={(e) => e.stopPropagation()}
+                            className="btn-primary !px-3 !py-1.5 text-xs flex items-center gap-1"
+                          >
+                            <Video className="w-3.5 h-3.5" /> Join
+                          </Link>
+                        )}
+                        {hasContent && (
+                          <button className="p-1.5 rounded-xl hover:bg-gray-100 text-text-secondary transition-colors">
+                            {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Expanded Content */}
+                    <AnimatePresence>
+                      {isExpanded && hasContent && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }}
+                          transition={{ duration: 0.2 }}
+                          className="overflow-hidden"
                         >
-                            {/* Modal Header */}
-                            <div className="flex items-center justify-between p-5 border-b border-gray-100 sticky top-0 bg-white rounded-t-2xl z-10">
-                                <div>
-                                    <h3 className="font-display font-bold text-lg text-text-primary">Session Details</h3>
-                                    <p className="text-sm text-text-secondary">
-                                        {selectedSession.isValidDate
-                                            ? selectedSession.safeDate.toLocaleDateString('en', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
-                                            : 'Unknown Date'
-                                        } • {selectedSession.time}
-                                    </p>
+                          <div className="mt-5 pt-5 border-t border-gray-100 space-y-5">
+
+                            {/* Session Note */}
+                            {hasNote && (
+                              <div>
+                                <h4 className="text-sm font-semibold text-text-primary mb-2 flex items-center gap-2">
+                                  <FileText className="w-4 h-4 text-primary" />
+                                  Doctor's Session Notes
+                                </h4>
+                                <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4">
+                                  <p className="text-sm text-text-primary leading-relaxed whitespace-pre-wrap">
+                                    {sessionNote.sessionDescription}
+                                  </p>
+                                  <p className="text-xs text-text-secondary mt-3">
+                                    Noted on {new Date(sessionNote.createdAt).toLocaleDateString('en', {
+                                      month: 'long', day: 'numeric', year: 'numeric'
+                                    })}
+                                  </p>
                                 </div>
-                                <button
-                                    onClick={() => { setSelectedSession(null); setSessionDetail(null); }}
-                                    className="p-2 rounded-xl hover:bg-gray-100 text-text-secondary transition-colors"
-                                >
-                                    <X className="w-5 h-5" />
-                                </button>
-                            </div>
+                              </div>
+                            )}
 
-                            <div className="p-5 space-y-5">
-                                {detailLoading ? (
-                                    <div className="flex items-center justify-center py-12">
-                                        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                            {/* Questionnaire Responses */}
+                            {hasResponses && (
+                              <div>
+                                <h4 className="text-sm font-semibold text-text-primary mb-3 flex items-center gap-2">
+                                  <ClipboardList className="w-4 h-4 text-primary" />
+                                  Your Questionnaire Responses
+                                </h4>
+                                <div className="space-y-4">
+                                  {questionnaireResponses.map((qr, qi) => (
+                                    <div key={qi} className="bg-purple-50 border border-purple-100 rounded-2xl p-4">
+                                      {/* Template Header */}
+                                      <div className="flex items-start justify-between mb-3">
+                                        <div>
+                                          <p className="text-sm font-bold text-purple-700">
+                                            {qr.template?.title || 'Questionnaire'}
+                                          </p>
+                                          {qr.template?.diseaseName && (
+                                            <p className="text-xs text-purple-500 mt-0.5">{qr.template.diseaseName}</p>
+                                          )}
+                                        </div>
+                                        {qr.totalScore > 0 && (
+                                          <span className="text-sm font-bold bg-purple-100 text-purple-700 px-3 py-1 rounded-xl">
+                                            Score: {qr.totalScore}
+                                          </span>
+                                        )}
+                                      </div>
+
+                                      {/* Responses */}
+                                      <div className="space-y-2">
+                                        {(qr.responses || []).map((r, ri) => (
+                                          <div key={ri} className="bg-white rounded-xl p-3 border border-purple-100">
+                                            <p className="text-xs text-text-secondary mb-1">{r.questionText}</p>
+                                            <p className="text-sm font-medium text-text-primary break-words">
+                                              {r.type === 'image' && typeof r.answer === 'string' && r.answer.startsWith('http') ? (
+                                                <a
+                                                  href={r.answer}
+                                                  target="_blank"
+                                                  rel="noreferrer"
+                                                  className="text-primary hover:underline"
+                                                >
+                                                  View Image →
+                                                </a>
+                                              ) : (
+                                                r.answer || <span className="text-gray-400 italic">No answer</span>
+                                              )}
+                                            </p>
+                                          </div>
+                                        ))}
+                                      </div>
+
+                                      <p className="text-xs text-purple-400 mt-3">
+                                        Submitted {new Date(qr.createdAt).toLocaleDateString('en', {
+                                          month: 'short', day: 'numeric', year: 'numeric'
+                                        })}
+                                      </p>
                                     </div>
-                                ) : (
-                                    <>
-                                        {/* Doctor Info */}
-                                        <div className="flex items-center gap-3 p-4 rounded-xl bg-gray-50">
-                                            <div className="w-12 h-12 rounded-xl bg-primary-light flex items-center justify-center text-2xl">👨‍⚕️</div>
-                                            <div>
-                                                <p className="font-semibold text-text-primary">{selectedSession.doctor?.name || 'Doctor'}</p>
-                                                <p className="text-sm text-text-secondary">{selectedSession.doctor?.specialization || 'Therapist'}</p>
-                                            </div>
-                                        </div>
-
-                                        {/* Session Description */}
-                                        <div>
-                                            <h4 className="font-semibold text-text-primary mb-3 flex items-center gap-2">
-                                                <FileText className="w-4 h-4 text-primary" />
-                                                Session Description
-                                            </h4>
-                                            {sessionDetail?.sessionNote?.sessionDescription ? (
-                                                <div className="p-4 rounded-xl bg-primary-light/50 border border-primary/10">
-                                                    <p className="text-sm text-text-primary leading-relaxed">{sessionDetail.sessionNote.sessionDescription}</p>
-                                                </div>
-                                            ) : (
-                                                <p className="text-sm text-text-secondary italic">No session description available</p>
-                                            )}
-                                        </div>
-
-                                        {/* Doctor's Report */}
-                                        <div>
-                                            <h4 className="font-semibold text-text-primary mb-3 flex items-center gap-2">
-                                                <FileText className="w-4 h-4 text-primary" />
-                                                Doctor's Report
-                                            </h4>
-                                            {sessionDetail?.sessionNote?.report ? (
-                                                <div className="p-4 rounded-xl bg-green-50 border border-green-200">
-                                                    <p className="text-sm text-text-primary leading-relaxed">{sessionDetail.sessionNote.report}</p>
-                                                </div>
-                                            ) : (
-                                                <p className="text-sm text-text-secondary italic">No report generated yet</p>
-                                            )}
-                                        </div>
-
-                                        {/* Questionnaire Responses */}
-                                        <div>
-                                            <h4 className="font-semibold text-text-primary mb-3 flex items-center gap-2">
-                                                <ClipboardList className="w-4 h-4 text-primary" />
-                                                Questionnaire Responses
-                                            </h4>
-                                            {sessionDetail?.questionnaireResponses?.length > 0 ? (
-                                                <div className="space-y-3">
-                                                    {sessionDetail.questionnaireResponses.map((qr, i) => (
-                                                        <div key={i} className="p-4 rounded-xl border border-gray-100">
-                                                            <div className="flex items-center justify-between mb-3">
-                                                                <div>
-                                                                    <p className="font-medium text-text-primary text-sm">{qr.template?.title || 'Questionnaire'}</p>
-                                                                    {qr.template?.diseaseName && (
-                                                                        <span className="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary">{qr.template.diseaseName}</span>
-                                                                    )}
-                                                                </div>
-                                                                {qr.totalScore > 0 && (
-                                                                    <span className="text-sm font-bold text-primary">Score: {qr.totalScore}</span>
-                                                                )}
-                                                            </div>
-                                                            <div className="space-y-2">
-                                                                {(qr.responses || []).map((r, ri) => (
-                                                                    <div key={ri} className="text-sm bg-gray-50 p-2 rounded-lg">
-                                                                        <p className="text-text-secondary text-xs mb-0.5">{r.questionText}</p>
-                                                                        <p className="font-medium text-text-primary">{r.answer}</p>
-                                                                    </div>
-                                                                ))}
-                                                            </div>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            ) : (
-                                                <p className="text-sm text-text-secondary italic">No questionnaires were submitted for this session</p>
-                                            )}
-                                        </div>
-                                    </>
-                                )}
-                            </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
                         </motion.div>
-                    </motion.div>
-                )}
-            </AnimatePresence>
-        </div>
-    );
+                      )}
+                    </AnimatePresence>
+                  </motion.div>
+                );
+              })}
+            </div>
+          )}
+        </motion.div>
+      </main>
+    </div>
+  );
 };
 
 export default PatientSessions;

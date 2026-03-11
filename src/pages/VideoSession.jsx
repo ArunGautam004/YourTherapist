@@ -56,8 +56,9 @@ const VideoSession = () => {
   const [videoOn, setVideoOn] = useState(true);
   const [showChat, setShowChat] = useState(false);
   const [showQuestionnaire, setShowQuestionnaire] = useState(false);
+  const [showNotes, setShowNotes] = useState(false);
+  const [noteId, setNoteId] = useState(null);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [showEndDialog, setShowEndDialog] = useState(false);
 
   const showChatRef = useRef(false);
   useEffect(() => {
@@ -87,8 +88,44 @@ const VideoSession = () => {
   const [sessionDescription, setSessionDescription] = useState('');
   const [savingDescription, setSavingDescription] = useState(false);
 
+  // ✅ FIX: appointment state declared BEFORE the auto-save useEffect that references it
   const [appointment, setAppointment] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  // Auto-save session notes when description changes
+  useEffect(() => {
+    const isDoc = user?.role === 'doctor' || user?.role === 'admin';
+    if (!isDoc || !appointment?._id || !sessionActive) return;
+
+    if (!sessionDescription.trim() && !noteId) return;
+
+    const timer = setTimeout(async () => {
+      setSavingDescription(true);
+      try {
+        if (!noteId) {
+          // Create new note
+          const { data } = await sessionAPI.createNote({
+            appointment: appointment._id,
+            patient: appointment.patient?._id || appointment.patient,
+            sessionDescription: sessionDescription.trim(),
+            isSharedWithPatient: true,
+          });
+          setNoteId(data.note._id);
+        } else {
+          // Update existing note
+          await sessionAPI.updateNote(noteId, {
+            sessionDescription: sessionDescription.trim(),
+          });
+        }
+      } catch (err) {
+        console.error('Failed to auto-save note:', err);
+      } finally {
+        setSavingDescription(false);
+      }
+    }, 1500); // 1.5 sec debounce
+
+    return () => clearTimeout(timer);
+  }, [sessionDescription, appointment, noteId, user, sessionActive]);
 
   // WebRTC refs
   const localVideoRef = useRef(null);
@@ -97,6 +134,10 @@ const VideoSession = () => {
   const localStream = useRef(null);
   const pendingCandidates = useRef([]);
   const isOfferSent = useRef(false);
+
+  // Screen Share state
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const screenStreamRef = useRef(null);
 
   // Scroll chat to bottom
   useEffect(() => {
@@ -370,28 +411,6 @@ const VideoSession = () => {
 
   const handleEndCall = async () => {
     const isDoc = user?.role === 'doctor' || user?.role === 'admin';
-    if (isDoc && !showEndDialog) {
-      setShowEndDialog(true);
-      return;
-    }
-
-    // If doctor, save session description
-    if (isDoc && sessionDescription.trim() && appointment?._id) {
-      setSavingDescription(true);
-      try {
-        await sessionAPI.createNote({
-          appointment: appointment._id,
-          patient: appointment.patient?._id || appointment.patient,
-          sessionDescription: sessionDescription.trim(),
-          isSharedWithPatient: true,
-        });
-        toast.success('Session description saved!');
-      } catch (err) {
-        console.error('Failed to save session description:', err);
-      }
-      setSavingDescription(false);
-    }
-
     const socket = getSocket();
     if (socket) socket.emit('call:end', { roomId });
     localStream.current?.getTracks().forEach(t => t.stop());
@@ -474,6 +493,59 @@ const VideoSession = () => {
       setQuestionnaireSubmitted(false);
       setActiveTemplateId(null);
     }, 2000);
+  };
+
+  // ─── Screen Share ─────────────────────────────────────────────────────────
+  const stopScreenShare = async () => {
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach(t => t.stop());
+      screenStreamRef.current = null;
+    }
+
+    if (peerConnection.current && localStream.current) {
+      const videoTrack = localStream.current.getVideoTracks().find(t => t.readyState === 'live');
+      const sender = peerConnection.current.getSenders().find(s => s.track && s.track.kind === 'video');
+      if (sender && videoTrack) {
+        sender.replaceTrack(videoTrack).catch(e => console.error(e));
+      }
+    }
+
+    if (localVideoRef.current && localStream.current) {
+      localVideoRef.current.srcObject = localStream.current;
+    }
+    setIsScreenSharing(false);
+  };
+
+  const toggleScreenShare = async () => {
+    if (!isScreenSharing) {
+      try {
+        const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        screenStreamRef.current = screenStream;
+
+        const screenTrack = screenStream.getVideoTracks()[0];
+
+        if (peerConnection.current) {
+          const sender = peerConnection.current.getSenders().find(s => s.track && s.track.kind === 'video');
+          if (sender) {
+            sender.replaceTrack(screenTrack).catch(e => console.error(e));
+          }
+        }
+
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = screenStream;
+        }
+
+        setIsScreenSharing(true);
+
+        screenTrack.onended = () => {
+          stopScreenShare();
+        };
+      } catch (err) {
+        console.error('Failed to share screen (or user cancelled)', err);
+      }
+    } else {
+      stopScreenShare();
+    }
   };
 
   // ─── Derived values ───────────────────────────────────────────────────────
@@ -627,7 +699,7 @@ const VideoSession = () => {
 
         {/* Side Panel */}
         <AnimatePresence>
-          {(showChat || showQuestionnaire) && (
+          {(showChat || showQuestionnaire || showNotes) && (
             <motion.div
               initial={{ width: 0, opacity: 0 }}
               animate={{ width: 380, opacity: 1 }}
@@ -638,11 +710,12 @@ const VideoSession = () => {
               {/* Panel Header */}
               <div className="flex items-center justify-between p-4 border-b border-gray-700">
                 <h3 className="text-white font-semibold flex items-center gap-2">
-                  {showChat ? <MessageSquare className="w-4 h-4" /> : <ClipboardList className="w-4 h-4" />}
-                  {showChat ? 'Session Chat' : 'Questionnaire'}
+                  {showChat && <><MessageSquare className="w-4 h-4" /> Session Chat</>}
+                  {showQuestionnaire && <><ClipboardList className="w-4 h-4" /> Questionnaire</>}
+                  {showNotes && <><FileText className="w-4 h-4" /> Session Notes</>}
                 </h3>
                 <button
-                  onClick={() => { setShowChat(false); setShowQuestionnaire(false); }}
+                  onClick={() => { setShowChat(false); setShowQuestionnaire(false); setShowNotes(false); }}
                   className="p-1.5 rounded-lg hover:bg-gray-700 text-gray-400 transition-colors"
                 >
                   <X className="w-4 h-4" />
@@ -899,58 +972,32 @@ const VideoSession = () => {
                   )}
                 </div>
               )}
+
+              {/* Notes Panel */}
+              {showNotes && (
+                <div className="flex-1 flex flex-col p-4 overflow-hidden bg-gray-800">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm font-medium text-gray-300">Observation & Treatment Notes</p>
+                    {savingDescription && <Loader2 className="w-3 h-3 text-primary animate-spin" />}
+                    {!savingDescription && sessionDescription.trim() && noteId && (
+                      <span className="text-success text-xs flex items-center gap-1">Saved</span>
+                    )}
+                  </div>
+                  <textarea
+                    value={sessionDescription}
+                    onChange={(e) => setSessionDescription(e.target.value)}
+                    placeholder="Type your notes here... They auto-save as you type and will appear in the patient's record."
+                    className="flex-1 w-full bg-gray-700 text-white placeholder:text-gray-500 px-4 py-3 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none"
+                  />
+                  <p className="text-xs text-gray-500 mt-3 text-center">
+                    Notes are visible in the patient's session history.
+                  </p>
+                </div>
+              )}
             </motion.div>
           )}
         </AnimatePresence>
       </div>
-
-      {/* End Session Dialog (Doctor) */}
-      <AnimatePresence>
-        {showEndDialog && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-          >
-            <motion.div
-              initial={{ scale: 0.95 }}
-              animate={{ scale: 1 }}
-              exit={{ scale: 0.95 }}
-              className="bg-gray-800 rounded-2xl max-w-md w-full p-6 border border-gray-700"
-            >
-              <h3 className="text-white font-display font-bold text-lg mb-2 flex items-center gap-2">
-                <FileText className="w-5 h-5 text-primary" />
-                Session Description
-              </h3>
-              <p className="text-gray-400 text-sm mb-4">Add a description for this session before ending. This will be visible in the patient's session history.</p>
-              <textarea
-                value={sessionDescription}
-                onChange={(e) => setSessionDescription(e.target.value)}
-                placeholder="Describe what was discussed, progress notes, observations..."
-                rows={5}
-                className="w-full bg-gray-700 text-white placeholder:text-gray-500 px-4 py-3 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none mb-4"
-              />
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setShowEndDialog(false)}
-                  className="flex-1 px-4 py-2.5 rounded-xl bg-gray-700 text-gray-300 hover:bg-gray-600 text-sm font-medium transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleEndCall}
-                  disabled={savingDescription}
-                  className="flex-1 px-4 py-2.5 rounded-xl bg-danger text-white hover:bg-red-600 text-sm font-medium transition-colors flex items-center justify-center gap-2"
-                >
-                  {savingDescription ? <Loader2 className="w-4 h-4 animate-spin" /> : <PhoneOff className="w-4 h-4" />}
-                  End Session
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       {/* Bottom Control Bar */}
       <div className="bg-gray-800/50 backdrop-blur-xl border-t border-gray-700 px-6 py-4">
@@ -972,8 +1019,9 @@ const VideoSession = () => {
               {videoOn ? <VideoIcon className="w-5 h-5" /> : <VideoOff className="w-5 h-5" />}
             </button>
             <button
-              className="w-12 h-12 rounded-2xl bg-gray-700 text-white hover:bg-gray-600 hidden sm:flex items-center justify-center transition-all"
-              title="Share screen"
+              onClick={toggleScreenShare}
+              className={`w-12 h-12 rounded-2xl hidden sm:flex items-center justify-center transition-all duration-200 ${isScreenSharing ? 'bg-primary text-white shadow-glow' : 'bg-gray-700 text-white hover:bg-gray-600'}`}
+              title={isScreenSharing ? 'Stop sharing screen' : 'Share screen'}
             >
               <Monitor className="w-5 h-5" />
             </button>
@@ -991,7 +1039,7 @@ const VideoSession = () => {
           {/* Right Controls */}
           <div className="flex items-center gap-2">
             <button
-              onClick={() => { setShowChat(!showChat); setShowQuestionnaire(false); setUnreadCount(0); }}
+              onClick={() => { setShowChat(!showChat); setShowQuestionnaire(false); setShowNotes(false); setUnreadCount(0); }}
               className={`relative w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-200 ${showChat ? 'bg-primary text-white' : 'bg-gray-700 text-white hover:bg-gray-600'}`}
               title="Chat"
             >
@@ -1003,12 +1051,21 @@ const VideoSession = () => {
               )}
             </button>
             <button
-              onClick={() => { setShowQuestionnaire(!showQuestionnaire); setShowChat(false); }}
+              onClick={() => { setShowQuestionnaire(!showQuestionnaire); setShowChat(false); setShowNotes(false); }}
               className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-200 ${showQuestionnaire ? 'bg-primary text-white' : 'bg-gray-700 text-white hover:bg-gray-600'}`}
               title="Questionnaire"
             >
               <ClipboardList className="w-5 h-5" />
             </button>
+            {isDoctor && (
+              <button
+                onClick={() => { setShowNotes(!showNotes); setShowChat(false); setShowQuestionnaire(false); }}
+                className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-200 ${showNotes ? 'bg-primary text-white' : 'bg-gray-700 text-white hover:bg-gray-600'}`}
+                title="Session Notes"
+              >
+                <FileText className="w-5 h-5" />
+              </button>
+            )}
           </div>
         </div>
       </div>

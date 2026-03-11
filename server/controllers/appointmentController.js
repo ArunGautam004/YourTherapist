@@ -139,11 +139,12 @@ export const verifyPayment = async (req, res, next) => {
     appointment.razorpaySignature = razorpay_signature;
     await appointment.save();
 
+    const dateStr = new Date(appointment.date).toLocaleDateString('en-IN', {
+      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+    });
+
     // Send confirmation email to patient
     try {
-      const dateStr = new Date(appointment.date).toLocaleDateString('en-IN', {
-        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
-      });
       await sendEmail({
         to: appointment.patient.email,
         subject: '✅ Appointment Confirmed — YourTherapist',
@@ -174,7 +175,18 @@ export const verifyPayment = async (req, res, next) => {
       console.error('⚠️ Confirmation email failed:', emailErr.message);
     }
 
-    // Welcome user via email (without the link message in chat)
+    // Send confirmation message in chat
+    try {
+      const Message = (await import('../models/Message.js')).default;
+      await Message.create({
+        sender: appointment.doctor._id,
+        receiver: appointment.patient._id,
+        text: `Hello ${appointment.patient.name}, your appointment for ${dateStr} at ${appointment.time} is confirmed. I look forward to our session!`,
+      });
+    } catch (msgErr) {
+      console.error('⚠️ Confirmation chat message failed:', msgErr.message);
+    }
+
     res.json({ message: 'Payment verified and appointment confirmed!', appointment });
   } catch (error) {
     next(error);

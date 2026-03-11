@@ -5,11 +5,17 @@ import { protect } from '../middleware/auth.js';
 
 const router = express.Router();
 
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET
-});
+let cloudinaryConfigured = false;
+const configureCloudinary = () => {
+  if (!cloudinaryConfigured) {
+    cloudinary.config({
+      cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+      api_key: process.env.CLOUDINARY_API_KEY,
+      api_secret: process.env.CLOUDINARY_API_SECRET
+    });
+    cloudinaryConfigured = true;
+  }
+};
 
 const storage = multer.memoryStorage();
 const upload = multer({
@@ -21,6 +27,7 @@ const upload = multer({
 // @route   POST /api/upload
 router.post('/', protect, upload.single('image'), async (req, res, next) => {
   try {
+    configureCloudinary();
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'Please upload an image' });
     }

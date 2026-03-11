@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Users, Calendar, BarChart3, MessageCircle, Settings,
   Video, Clock, TrendingUp, AlertTriangle, ArrowRight, Bell, ClipboardList
@@ -31,11 +31,11 @@ const adminLinks = [
 
 const AdminDashboard = () => {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [todaySessions, setTodaySessions] = useState([]);
   const [patients, setPatients] = useState([]);
   const [analytics, setAnalytics] = useState(null);
   const [loading, setLoading] = useState(true);
-
   const [totalUnreadMessages, setTotalUnreadMessages] = useState(0);
 
   useEffect(() => {
@@ -62,6 +62,11 @@ const AdminDashboard = () => {
     fetchData();
   }, []);
 
+  // ✅ Navigate to patients page with selected patient
+  const handlePatientClick = (patientId) => {
+    navigate(`/admin/patients?selected=${patientId}`);
+  };
+
   const stats = [
     { label: 'Total Patients', value: analytics?.totalPatients || '—', change: 'All time', icon: Users, color: 'from-primary to-emerald-400' },
     {
@@ -85,7 +90,6 @@ const AdminDashboard = () => {
         const now = new Date();
         const diff = (aptDate - now) / 60000;
 
-        // Ongoing = within 10 mins of start OR has started and not yet ended
         const isOngoing = diff <= 10 && now < endTime && s.status !== 'cancelled';
         const isUpcoming = aptDate > now && s.status !== 'cancelled';
 
@@ -110,7 +114,12 @@ const AdminDashboard = () => {
   };
 
   const getStatusBadge = (status) => {
-    const styles = { completed: 'bg-success/10 text-success', upcoming: 'bg-primary/10 text-primary', scheduled: 'bg-gray-100 text-text-secondary', 'in-progress': 'bg-primary/10 text-primary' };
+    const styles = {
+      completed: 'bg-success/10 text-success',
+      upcoming: 'bg-primary/10 text-primary',
+      scheduled: 'bg-gray-100 text-text-secondary',
+      'in-progress': 'bg-primary/10 text-primary'
+    };
     return styles[status] || styles.scheduled;
   };
 
@@ -142,7 +151,6 @@ const AdminDashboard = () => {
               <p className="text-text-secondary mt-1">Here's your practice overview for today.</p>
             </div>
 
-            {/* Notification Dropdown */}
             <div className="relative">
               <Link
                 to="/admin/messages"
@@ -243,7 +251,6 @@ const AdminDashboard = () => {
                         const now = new Date();
                         const diff = (aptDate - now) / 60000;
 
-                        // Ongoing = within 10 mins of start OR has started and not yet ended
                         const isOngoing = diff <= 10 && now < endTime && session.status !== 'cancelled';
                         const isPast = ['completed', 'cancelled', 'no-show'].includes(session.status) || now >= endTime;
                         const isUpcoming = aptDate > now && !isPast && !isOngoing;
@@ -261,7 +268,6 @@ const AdminDashboard = () => {
                         return { ...session, isOngoing, isPast, isUpcoming, displayStatus, aptDate };
                       })
                       .sort((a, b) => {
-                        // Ongoing first, then upcoming, then past
                         if (a.isOngoing && !b.isOngoing) return -1;
                         if (!a.isOngoing && b.isOngoing) return 1;
                         if (a.isUpcoming && b.isPast) return -1;
@@ -269,7 +275,11 @@ const AdminDashboard = () => {
                         return a.aptDate - b.aptDate;
                       })
                       .map((session) => (
-                        <div key={session._id} className="flex items-center gap-3 p-3 rounded-2xl hover:bg-gray-50 transition-colors">
+                        <div
+                          key={session._id}
+                          className="flex items-center gap-3 p-3 rounded-2xl hover:bg-gray-50 transition-colors cursor-pointer"
+                          onClick={() => session.patient?._id && handlePatientClick(session.patient._id)}
+                        >
                           <div className="w-10 h-10 rounded-xl bg-primary-light flex items-center justify-center text-xl flex-shrink-0 overflow-hidden">
                             {session.patient?.profilePic ? (
                               <img src={session.patient.profilePic} alt={session.patient.name} className="w-full h-full object-cover" />
@@ -292,7 +302,11 @@ const AdminDashboard = () => {
                             </span>
                           )}
                           {session.meetingLink && session.isOngoing && (
-                            <Link to={session.meetingLink || '#'} className="btn-primary !px-3 !py-1.5 text-xs flex items-center gap-1">
+                            <Link
+                              to={session.meetingLink || '#'}
+                              onClick={(e) => e.stopPropagation()}
+                              className="btn-primary !px-3 !py-1.5 text-xs flex items-center gap-1"
+                            >
                               <Video className="w-3.5 h-3.5" /> Start
                             </Link>
                           )}
@@ -304,7 +318,7 @@ const AdminDashboard = () => {
                 )}
               </motion.div>
 
-              {/* Recent Patients */}
+              {/* Recent Patients - ✅ Now clickable, navigates to patient detail */}
               <motion.div variants={fadeInUp} className="lg:col-span-2 card">
                 <div className="flex items-center justify-between mb-5">
                   <h2 className="font-display font-bold text-lg text-text-primary">Recent Patients</h2>
@@ -314,13 +328,21 @@ const AdminDashboard = () => {
                 </div>
                 <div className="space-y-3">
                   {patients.map((patient) => (
-                    <div key={patient._id} className="p-3 rounded-2xl bg-gray-50 hover:bg-primary-light/20 transition-colors cursor-pointer">
+                    <div
+                      key={patient._id}
+                      className="p-3 rounded-2xl bg-gray-50 hover:bg-primary-light/20 transition-colors cursor-pointer group"
+                      onClick={() => handlePatientClick(patient._id)}
+                    >
                       <div className="flex items-center gap-3 mb-2">
-                        <div className="w-10 h-10 rounded-xl bg-primary-light flex items-center justify-center text-xl">
-                          👤
+                        <div className="w-10 h-10 rounded-xl bg-primary-light flex items-center justify-center text-xl overflow-hidden">
+                          {patient.profilePic ? (
+                            <img src={patient.profilePic} alt={patient.name} className="w-full h-full object-cover" />
+                          ) : '👤'}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-text-primary truncate">{patient.name}</p>
+                          <p className="text-sm font-semibold text-text-primary truncate group-hover:text-primary transition-colors">
+                            {patient.name}
+                          </p>
                           <p className="text-xs text-text-secondary">{patient.sessions || 0} sessions</p>
                         </div>
                         <span className={`text-xs px-2 py-1 rounded-full font-medium ${getRiskBadge(patient.riskLevel)}`}>

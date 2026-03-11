@@ -125,16 +125,18 @@ const AdminAnalytics = () => {
             {/* Session Trend Chart */}
             <div className="lg:col-span-3 card">
               <h2 className="font-display font-bold text-lg text-text-primary mb-6">Session Overview</h2>
-              <div className="flex items-end justify-between gap-2" style={{ height: 200 }}>
-                {(analytics?.monthlyData || []).map((month, i) => (
-                  <div key={i} className="flex-1 flex flex-col items-center gap-2">
-                    <span className="text-xs text-text-secondary font-medium">{month.sessions}</span>
-                    <div className="w-full max-w-[60px] rounded-t-xl bg-gradient-to-t from-primary to-primary/60 transition-all duration-500"
-                      style={{ height: `${(month.sessions / maxSessions) * 160}px`, minHeight: '4px' }}
-                    />
-                    <span className="text-xs text-text-secondary">{month.month}</span>
-                  </div>
-                ))}
+              <div className="overflow-x-auto hide-scrollbar">
+                <div className="flex items-end justify-between gap-2 min-w-[300px]" style={{ height: 200 }}>
+                  {(analytics?.monthlyData || []).map((month, i) => (
+                    <div key={i} className="flex-1 flex flex-col items-center gap-2">
+                      <span className="text-xs text-text-secondary font-medium">{month.sessions}</span>
+                      <div className="w-full max-w-[60px] rounded-t-xl bg-gradient-to-t from-primary to-primary/60 transition-all duration-500"
+                        style={{ height: `${(month.sessions / maxSessions) * 160}px`, minHeight: '4px' }}
+                      />
+                      <span className="text-xs text-text-secondary">{month.month}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
 
@@ -142,22 +144,24 @@ const AdminAnalytics = () => {
             <div className="lg:col-span-2 card">
               <h2 className="font-display font-bold text-lg text-text-primary mb-5">Daily Revenue</h2>
               {(analytics?.dailyData || []).length > 0 ? (
-                <div className="flex items-end justify-between h-48 gap-2 mt-4 pb-6">
-                  {analytics.dailyData.map((day, i) => {
-                    const maxDailyRev = Math.max(...analytics.dailyData.map(d => d.revenue), 1);
-                    const height = (day.revenue / maxDailyRev) * 120;
-                    return (
-                      <div key={i} className="flex-1 flex flex-col items-center gap-2 group relative">
-                        <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none">
-                          ₹{day.revenue.toLocaleString()} • {day.orders} orders
+                <div className="overflow-x-auto hide-scrollbar">
+                  <div className="flex items-end justify-between h-48 gap-2 mt-4 pb-6 min-w-[300px]">
+                    {analytics.dailyData.map((day, i) => {
+                      const maxDailyRev = Math.max(...analytics.dailyData.map(d => d.revenue), 1);
+                      const height = (day.revenue / maxDailyRev) * 120;
+                      return (
+                        <div key={i} className="flex-1 flex flex-col items-center gap-2 group relative">
+                          <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none">
+                            ₹{day.revenue.toLocaleString()} • {day.orders} orders
+                          </div>
+                          <div className="w-full max-w-[32px] bg-gradient-to-t from-secondary to-purple-400 rounded-t-lg transition-all duration-500 hover:brightness-110 cursor-help"
+                            style={{ height: `${height}px`, minHeight: '4px' }}
+                          />
+                          <span className="text-[10px] text-text-secondary font-medium mt-1 whitespace-nowrap">{day.date.split(',')[0]}</span>
                         </div>
-                        <div className="w-full max-w-[32px] bg-gradient-to-t from-secondary to-purple-400 rounded-t-lg transition-all duration-500 hover:brightness-110 cursor-help"
-                          style={{ height: `${height}px`, minHeight: '4px' }}
-                        />
-                        <span className="text-[10px] text-text-secondary font-medium mt-1 whitespace-nowrap">{day.date.split(',')[0]}</span>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </div>
               ) : (
                 <p className="text-sm text-text-secondary text-center py-12">No daily data available</p>
