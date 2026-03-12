@@ -12,31 +12,32 @@ const router = express.Router();
 
 router.use(protect);
 
-// Session Notes
+// ─── Session Notes ────────────────────────────────────────────────────────────
 router.post('/notes', authorize('doctor', 'admin'), createSessionNote);
 router.get('/notes/:patientId', getSessionNotes);
 router.put('/notes/:id', authorize('doctor', 'admin'), updateSessionNote);
 
-// Patient's own full session history (notes + questionnaire responses)
+// ─── Patient's own full session history ──────────────────────────────────────
 router.get('/my-history', getPatientSessionHistory);
 
-// Session Detail (doctor or patient - patient restricted to own)
+// ─── Session Detail ───────────────────────────────────────────────────────────
 router.get('/detail/:appointmentId', getSessionDetail);
 
-// Questionnaire Templates (doctor only)
+// ─── Questionnaire Templates ──────────────────────────────────────────────────
+// ⚠️ CRITICAL: static routes MUST be declared BEFORE /:id or Express matches them as IDs
+router.get('/questionnaires/diseases', authorize('doctor', 'admin'), getDiseaseList);
+router.get('/questionnaires/by-disease/:diseaseName', authorize('doctor', 'admin'), getQuestionnairesByDisease);
+
+// ⚠️ respond route must also be before /:id
+router.post('/questionnaires/respond', submitQuestionnaireResponse);
+router.get('/questionnaires/responses/:appointmentId', getQuestionnaireResponses);
+
+// Dynamic /:id routes AFTER all statics
 router.route('/questionnaires')
   .get(authorize('doctor', 'admin'), getQuestionnaireTemplates)
   .post(authorize('doctor', 'admin'), createQuestionnaireTemplate);
 
 router.put('/questionnaires/:id', authorize('doctor', 'admin'), updateQuestionnaireTemplate);
 router.delete('/questionnaires/:id', authorize('doctor', 'admin'), deleteQuestionnaireTemplate);
-
-// ⚠️ Static routes MUST come before dynamic :param routes
-router.get('/questionnaires/diseases', authorize('doctor', 'admin'), getDiseaseList);
-router.get('/questionnaires/by-disease/:diseaseName', authorize('doctor', 'admin'), getQuestionnairesByDisease);
-
-// Questionnaire Responses
-router.post('/questionnaires/respond', submitQuestionnaireResponse);
-router.get('/questionnaires/responses/:appointmentId', getQuestionnaireResponses);
 
 export default router;

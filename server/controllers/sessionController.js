@@ -150,7 +150,17 @@ export const getDiseaseList = async (req, res, next) => {
 
 export const submitQuestionnaireResponse = async (req, res, next) => {
   try {
-    const { templateId, appointmentId, responses } = req.body;
+    const { templateId, appointmentId, responses, doctorId } = req.body;
+
+    // Guard: appointmentId must be a valid 24-char MongoDB ObjectId
+    if (!appointmentId || appointmentId.length !== 24) {
+      return res.status(400).json({
+        message: 'Invalid appointmentId. Must be the MongoDB _id of the appointment, not the meeting room URL.',
+      });
+    }
+    if (!templateId || !responses?.length) {
+      return res.status(400).json({ message: 'templateId and responses are required' });
+    }
 
     let totalScore = 0;
     responses.forEach(r => {
@@ -170,7 +180,7 @@ export const submitQuestionnaireResponse = async (req, res, next) => {
     if (existing) {
       response = await QuestionnaireResponse.findByIdAndUpdate(
         existing._id,
-        { responses, totalScore, doctor: req.body.doctorId },
+        { responses, totalScore, doctor: doctorId },
         { new: true }
       );
     } else {
@@ -178,7 +188,7 @@ export const submitQuestionnaireResponse = async (req, res, next) => {
         template: templateId,
         appointment: appointmentId,
         patient: req.user._id,
-        doctor: req.body.doctorId,
+        doctor: doctorId,
         responses,
         totalScore,
       });

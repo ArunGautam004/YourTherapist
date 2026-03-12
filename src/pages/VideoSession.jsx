@@ -87,23 +87,31 @@ const VideoSession = () => {
   // Session description (doctor)
   const [sessionDescription, setSessionDescription] = useState('');
   const [savingDescription, setSavingDescription] = useState(false);
+  const [noteSaves, setNoteSaves] = useState([]); // history of saves shown to doctor
+
+  // Refs to avoid stale closures in socket handlers
+  const appointmentRef = useRef(null);
+  const activeTemplateIdRef = useRef(null);
 
   // ✅ FIX: appointment state declared BEFORE the auto-save useEffect that references it
   const [appointment, setAppointment] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Auto-save session notes when description changes
+  // Keep ref in sync so socket handlers always have latest appointment
+  useEffect(() => {
+    appointmentRef.current = appointment;
+  }, [appointment]);
+
+  // Auto-save session notes when description changes (doctor only)
   useEffect(() => {
     const isDoc = user?.role === 'doctor' || user?.role === 'admin';
-    if (!isDoc || !appointment?._id || !sessionActive) return;
-
+    if (!isDoc || !appointment?._id) return;
     if (!sessionDescription.trim() && !noteId) return;
 
     const timer = setTimeout(async () => {
       setSavingDescription(true);
       try {
         if (!noteId) {
-          // Create new note
           const { data } = await sessionAPI.createNote({
             appointment: appointment._id,
             patient: appointment.patient?._id || appointment.patient,
@@ -112,20 +120,23 @@ const VideoSession = () => {
           });
           setNoteId(data.note._id);
         } else {
-          // Update existing note
           await sessionAPI.updateNote(noteId, {
             sessionDescription: sessionDescription.trim(),
           });
         }
+        // Record save in history
+        const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        setNoteSaves(prev => [{ time: now, preview: sessionDescription.trim().slice(0, 60) }, ...prev].slice(0, 5));
       } catch (err) {
         console.error('Failed to auto-save note:', err);
+        toast.error('Note failed to save');
       } finally {
         setSavingDescription(false);
       }
-    }, 1500); // 1.5 sec debounce
+    }, 1500);
 
     return () => clearTimeout(timer);
-  }, [sessionDescription, appointment, noteId, user, sessionActive]);
+  }, [sessionDescription, appointment, noteId, user]);
 
   // WebRTC refs
   const localVideoRef = useRef(null);
@@ -361,7 +372,10 @@ const VideoSession = () => {
       setQuestionnaireSubmitted(false);
       setShowQuestionnaire(true);
       setShowChat(false);
-      if (data.templateId) setActiveTemplateId(data.templateId);
+      if (data.templateId) {
+        setActiveTemplateId(data.templateId);
+        activeTemplateIdRef.current = data.templateId; // ✅ keep ref in sync for submit handler
+      }
       toast('Received a questionnaire from doctor', { icon: '📋' });
     };
 
@@ -466,32 +480,41 @@ const VideoSession = () => {
     if (socket) socket.emit('questionnaire:submit', { roomId, responses: answers });
 
     try {
-      if (user?.role !== 'doctor' && user?.role !== 'admin' && activeTemplateId && appointment?.doctor?._id) {
-        const formattedResponses = Object.keys(answers).map(idx => {
-          const q = questions[parseInt(idx)] || {};
+      const isPatient = user?.role !== 'doctor' && user?.role !== 'admin';
+      // ✅ FIX 1: use ref so we always have latest values even if state hasn't updated
+      const templateId = activeTemplateIdRef.current || activeTemplateId;
+      const apt = appointmentRef.current || appointment;
+
+      if (isPatient && templateId && apt?._id && apt?.doctor?._id) {
+        // ✅ FIX 2: answers keys are question._id OR numeric index — map consistently
+        const formattedResponses = questions.map((q, idx) => {
+          const key = q._id || idx; // same key used when setting answers
           return {
             questionId: q._id || String(idx),
-            questionText: q.text || `Question ${parseInt(idx) + 1}`,
+            questionText: q.text || `Question ${idx + 1}`,
             type: q.type || 'text',
-            answer: answers[idx]
+            answer: answers[key] ?? '',
           };
         });
 
         await sessionAPI.submitResponse({
-          templateId: activeTemplateId,
-          appointmentId: roomId,
-          doctorId: appointment.doctor._id,
-          responses: formattedResponses
+          templateId,
+          appointmentId: apt._id,   // ✅ FIX 3: real MongoDB _id, not roomId URL param
+          doctorId: apt.doctor._id,
+          responses: formattedResponses,
         });
+        toast.success('Responses saved!');
       }
     } catch (err) {
       console.error('Failed to save questionnaire response:', err);
+      toast.error('Failed to save responses');
     }
 
     setTimeout(() => {
       setShowQuestionnaire(false);
       setQuestionnaireSubmitted(false);
       setActiveTemplateId(null);
+      activeTemplateIdRef.current = null;
     }, 2000);
   };
 
@@ -978,19 +1001,76 @@ const VideoSession = () => {
                 <div className="flex-1 flex flex-col p-4 overflow-hidden bg-gray-800">
                   <div className="flex items-center justify-between mb-2">
                     <p className="text-sm font-medium text-gray-300">Observation & Treatment Notes</p>
-                    {savingDescription && <Loader2 className="w-3 h-3 text-primary animate-spin" />}
-                    {!savingDescription && sessionDescription.trim() && noteId && (
-                      <span className="text-success text-xs flex items-center gap-1">Saved</span>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {savingDescription && (
+                        <span className="text-xs text-gray-400 flex items-center gap-1">
+                          <Loader2 className="w-3 h-3 text-primary animate-spin" /> Saving…
+                        </span>
+                      )}
+                      {!savingDescription && noteId && (
+                        <span className="text-success text-xs flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3" /> Saved
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <textarea
                     value={sessionDescription}
                     onChange={(e) => setSessionDescription(e.target.value)}
                     placeholder="Type your notes here... They auto-save as you type and will appear in the patient's record."
-                    className="flex-1 w-full bg-gray-700 text-white placeholder:text-gray-500 px-4 py-3 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none"
+                    className="flex-1 w-full bg-gray-700 text-white placeholder:text-gray-500 px-4 py-3 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none min-h-[140px]"
                   />
-                  <p className="text-xs text-gray-500 mt-3 text-center">
-                    Notes are visible in the patient's session history.
+
+                  {/* Manual save button */}
+                  <button
+                    onClick={async () => {
+                      if (!sessionDescription.trim() || !appointment?._id) return;
+                      setSavingDescription(true);
+                      try {
+                        if (!noteId) {
+                          const { data } = await sessionAPI.createNote({
+                            appointment: appointment._id,
+                            patient: appointment.patient?._id || appointment.patient,
+                            sessionDescription: sessionDescription.trim(),
+                            isSharedWithPatient: true,
+                          });
+                          setNoteId(data.note._id);
+                        } else {
+                          await sessionAPI.updateNote(noteId, { sessionDescription: sessionDescription.trim() });
+                        }
+                        const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                        setNoteSaves(prev => [{ time: now, preview: sessionDescription.trim().slice(0, 60) }, ...prev].slice(0, 5));
+                        toast.success('Note saved!');
+                      } catch {
+                        toast.error('Failed to save note');
+                      } finally {
+                        setSavingDescription(false);
+                      }
+                    }}
+                    disabled={savingDescription || !sessionDescription.trim()}
+                    className="mt-2 w-full py-2 rounded-xl bg-primary text-white text-xs font-semibold hover:bg-primary-dark transition-colors disabled:opacity-40 flex items-center justify-center gap-1"
+                  >
+                    {savingDescription ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
+                    Save Now
+                  </button>
+
+                  {/* Save history */}
+                  {noteSaves.length > 0 && (
+                    <div className="mt-3 border-t border-gray-700 pt-3">
+                      <p className="text-xs text-gray-500 mb-2 font-medium uppercase tracking-wider">Save History</p>
+                      <div className="space-y-1.5 max-h-32 overflow-y-auto">
+                        {noteSaves.map((save, i) => (
+                          <div key={i} className="flex items-start gap-2 bg-gray-700/50 rounded-lg px-2.5 py-1.5">
+                            <span className="text-[10px] text-primary-300 font-mono shrink-0 mt-0.5">{save.time}</span>
+                            <span className="text-[11px] text-gray-400 truncate">{save.preview}{save.preview.length === 60 ? '…' : ''}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <p className="text-xs text-gray-500 mt-2 text-center">
+                    Auto-saves as you type • Visible in patient's session history
                   </p>
                 </div>
               )}
