@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
+import NotificationBell from './NotificationBell';
 import {
   Brain, LayoutDashboard, Calendar, Users, BarChart3,
   MessageCircle, Settings, LogOut, Menu, X, Bell, Search, ChevronDown
@@ -111,18 +112,9 @@ const Sidebar = ({ links, userRole = 'patient' }) => {
           </span>
         </Link>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => {
-              toast('No new notifications', {
-                icon: '🔔',
-                style: { borderRadius: '10px', background: '#333', color: '#fff' }
-              });
-            }}
-            className="p-2 rounded-xl hover:bg-gray-100 text-text-secondary relative"
-          >
-            <Bell className="w-5 h-5" />
-            <span className="absolute top-1 right-1 w-2 h-2 bg-danger rounded-full" />
-          </button>
+          <div className="flex items-center -mr-1">
+            <NotificationBell />
+          </div>
           <button
             onClick={() => setMobileOpen(!mobileOpen)}
             className="p-2 rounded-xl hover:bg-gray-100 text-text-secondary"

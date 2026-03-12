@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   LayoutDashboard, Users, Calendar, BarChart3, MessageCircle, Settings,
   Search, AlertTriangle, TrendingUp, TrendingDown, Minus,
@@ -11,6 +11,7 @@ import Sidebar from '../../components/layout/Sidebar';
 import { patientAPI, sessionAPI, messageAPI } from '../../services/api';
 
 const AdminPatients = () => {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
   const [filterRisk, setFilterRisk] = useState('all');
@@ -279,6 +280,14 @@ const AdminPatients = () => {
                           </button>
                         </div>
                       )}
+                    </div>
+                    <div className="flex flex-col gap-2 mt-4 px-4">
+                      <button 
+                        onClick={() => navigate('/admin/messages', { state: { patientId: selectedPatient._id } })}
+                        className="btn-primary flex items-center justify-center gap-2 !py-2.5 text-sm w-full"
+                      >
+                        <MessageCircle className="w-4 h-4" /> Message Patient
+                      </button>
                     </div>
                   </div>
                   <div className="space-y-3">

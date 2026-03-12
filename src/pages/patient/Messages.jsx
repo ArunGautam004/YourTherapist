@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
+import { useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Calendar, BookOpen, MessageCircle, Settings,
   Send, Phone, Video, Search, Loader2, ArrowLeft, Clock
@@ -20,6 +21,7 @@ const patientLinks = [
 
 const PatientMessages = () => {
   const { user } = useAuth();
+  const location = useLocation();
   const [conversations, setConversations] = useState([]);
   const [activeConvo, setActiveConvo] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -34,7 +36,13 @@ const PatientMessages = () => {
         const { data } = await messageAPI.getConversations();
         setConversations(data.conversations || []);
         if (data.conversations?.length > 0) {
-          setActiveConvo(data.conversations[0]);
+          const targetId = location.state?.doctorId;
+          if (targetId) {
+            const targetConvo = data.conversations.find(c => c.partner._id === targetId);
+            if (targetConvo) setActiveConvo(targetConvo);
+          } else if (window.innerWidth >= 768) {
+            setActiveConvo(data.conversations[0]);
+          }
         }
       } catch (err) {
         console.error(err);
