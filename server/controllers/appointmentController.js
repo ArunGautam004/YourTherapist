@@ -231,6 +231,92 @@ export const verifyPayment = async (req, res, next) => {
       if (doctorNotif) io.to(`user:${appointment.doctor._id}`).emit('notification:new', doctorNotif);
     }
 
+    // ── 7. Immediate reminder if session starts within 10 minutes ────────
+    // If the patient books last-minute, the scheduler window will never catch
+    // it, so we send the join link right now and mark reminderSent = true.
+    try {
+      const aptDate = new Date(appointment.date);
+      const [timePart, period] = (appointment.time || '').split(' ');
+      let [h, m] = (timePart || '0:0').split(':').map(Number);
+      if (period === 'PM' && h !== 12) h += 12;
+      if (period === 'AM' && h === 12) h = 0;
+      aptDate.setHours(h, m || 0, 0, 0);
+
+      const minsUntilSession = (aptDate - new Date()) / 60000;
+
+      if (minsUntilSession <= 10 && minsUntilSession > -5) {
+        // Session is imminent — send join link immediately
+        const { reminderEmail } = await import('../utils/emailTemplates.js');
+
+        const reminderAptData = {
+          patientName: appointment.patient.name,
+          doctorName: appointment.doctor.name,
+          dateStr,
+          time: appointment.time,
+          type: appointment.type,
+        };
+
+        // Email → patient
+        try {
+          await sendEmail({
+            to: appointment.patient.email,
+            subject: '🎥 Your Session is Starting Now — YourTherapist',
+            htmlContent: reminderEmail(reminderAptData, appointment.patient.name, joinUrl),
+          });
+        } catch (e) {
+          console.error('Immediate reminder email to patient failed:', e.message);
+        }
+
+        // Email → doctor
+        try {
+          await sendEmail({
+            to: appointment.doctor.email,
+            subject: '🎥 Session Starting Now — YourTherapist',
+            htmlContent: reminderEmail(
+              reminderAptData,
+              appointment.doctor.name.startsWith('Dr.') ? appointment.doctor.name : `Dr. ${appointment.doctor.name}`,
+              joinUrl
+            ),
+          });
+        } catch (e) {
+          console.error('Immediate reminder email to doctor failed:', e.message);
+        }
+
+        // In-app notification → patient with join link
+        const immediatePatientNotif = await createNotification({
+          userId: appointment.patient._id,
+          type: 'appointment_reminder',
+          title: '🎥 Your Session is Starting Now',
+          message: `Your session with Dr. ${appointment.doctor.name} is starting. Join now!`,
+          link: appointment.meetingLink,
+          meta: { appointmentId: appointment._id, joinUrl },
+        });
+
+        // In-app notification → doctor
+        const immediateDoctorNotif = await createNotification({
+          userId: appointment.doctor._id,
+          type: 'appointment_reminder',
+          title: '🎥 Session Starting Now',
+          message: `${appointment.patient.name} just booked and the session is starting now!`,
+          link: appointment.meetingLink,
+          meta: { appointmentId: appointment._id, joinUrl },
+        });
+
+        if (io) {
+          if (immediatePatientNotif) io.to(`user:${appointment.patient._id}`).emit('notification:new', immediatePatientNotif);
+          if (immediateDoctorNotif) io.to(`user:${appointment.doctor._id}`).emit('notification:new', immediateDoctorNotif);
+        }
+
+        // Mark reminderSent so scheduler doesn't send again
+        appointment.reminderSent = true;
+        await appointment.save();
+
+        console.log(`⚡ Immediate reminder sent for last-minute booking ${appointment._id}`);
+      }
+    } catch (e) {
+      console.error('Immediate reminder check failed:', e.message);
+    }
+
     res.json({ message: 'Payment verified and appointment confirmed!', appointment });
   } catch (error) {
     next(error);
