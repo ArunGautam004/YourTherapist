@@ -17,7 +17,12 @@ const Sidebar = ({ links, userRole = 'patient' }) => {
   const { user: authUser, logout } = useAuth();
 
   const displayUser = authUser
-    ? { name: authUser.name, role: authUser.role === 'doctor' ? authUser.specialization || 'Doctor' : 'Patient', avatar: authUser.role === 'doctor' ? '👩‍⚕️' : '👤', profilePic: authUser.profilePic }
+    ? { 
+        name: authUser.name || (authUser.role === 'doctor' ? 'Doctor' : 'Patient'), 
+        role: authUser.role === 'doctor' ? authUser.specialization || 'Clinical Psychologist' : 'Patient', 
+        avatar: authUser.role === 'doctor' ? '👩‍⚕️' : '👤', 
+        profilePic: authUser.profilePic 
+      }
     : userRole === 'admin'
       ? { name: 'Doctor', role: 'Clinical Psychologist', avatar: '👩‍⚕️', profilePic: null }
       : { name: 'Patient', role: 'Patient', avatar: '👤', profilePic: null };

@@ -283,7 +283,7 @@ const AdminPatients = () => {
                     </div>
                     <div className="flex flex-col gap-2 mt-4 px-4">
                       <button 
-                        onClick={() => navigate('/admin/messages', { state: { patientId: selectedPatient._id } })}
+                        onClick={() => navigate('/admin/messages', { state: { targetPartner: selectedPatient } })}
                         className="btn-primary flex items-center justify-center gap-2 !py-2.5 text-sm w-full"
                       >
                         <MessageCircle className="w-4 h-4" /> Message Patient

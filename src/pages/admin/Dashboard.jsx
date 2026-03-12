@@ -357,7 +357,7 @@ const AdminDashboard = () => {
                               : '👤'}
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold text-text-primary truncate">{session.patient?.name}</p>
+                            <p className="text-sm font-semibold text-text-primary truncate">{session.patient?.name || 'Patient'}</p>
                             <p className="text-xs text-text-secondary flex items-center gap-1">
                               <Clock className="w-3 h-3" /> {session.time} • {session.duration || 50} min
                             </p>
@@ -411,7 +411,7 @@ const AdminDashboard = () => {
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-semibold text-text-primary truncate group-hover:text-primary transition-colors">
-                            {patient.name}
+                            {patient.name || 'Patient'}
                           </p>
                           <p className="text-xs text-text-secondary">{patient.sessions || 0} sessions</p>
                         </div>

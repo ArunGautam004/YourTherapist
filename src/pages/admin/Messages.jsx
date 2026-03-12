@@ -42,17 +42,20 @@ const AdminMessages = () => {
         const fetchConversations = async () => {
             try {
                 const { data } = await messageAPI.getConversations();
-                setConversations(data.conversations || []);
-                if (data.conversations?.length > 0) {
-                    const targetId = location.state?.patientId;
-                    if (targetId) {
-                        const targetConvo = data.conversations.find(c => c.partner._id === targetId);
-                        if (targetConvo) {
-                            setActiveConvo(targetConvo);
-                        }
-                    } else if (window.innerWidth >= 768) {
-                        setActiveConvo(data.conversations[0]);
+                const convos = data.conversations || [];
+                setConversations(convos);
+
+                if (location.state?.targetPartner) {
+                    const target = location.state.targetPartner;
+                    const existing = convos.find(c => c.partner?._id === target._id);
+                    if (existing) {
+                        setActiveConvo(existing);
+                    } else {
+                        // New conversation starting from patient profile
+                        setActiveConvo({ partner: target, lastMessage: null, unreadCount: 0 });
                     }
+                } else if (convos.length > 0 && window.innerWidth >= 768) {
+                    setActiveConvo(convos[0]);
                 }
             } catch (err) {
                 console.error(err);
@@ -61,17 +64,17 @@ const AdminMessages = () => {
             }
         };
         fetchConversations();
-    }, []);
+    }, [location.state]); // Listen for state changes
 
     useEffect(() => {
         if (!activeConvo?.partner?._id) return;
         const fetchMessages = async () => {
             try {
-                const { data } = await messageAPI.getMessages(activeConvo.partner._id);
+                const { data } = await messageAPI.getMessages(activeConvo.partner?._id);
                 setMessages(data.messages || []);
 
                 setConversations(prev => prev.map(c =>
-                    c.partner._id === activeConvo.partner._id ? { ...c, unreadCount: 0 } : c
+                    c.partner?._id === activeConvo.partner?._id ? { ...c, unreadCount: 0 } : c
                 ));
             } catch (err) {
                 console.error(err);
@@ -93,7 +96,7 @@ const AdminMessages = () => {
                 // If the message is from/to a partner in our active conversations list, update the snippet
                 if (c.partner?._id === msg.sender || c.partner?._id === msg.receiver) {
                     const isFromPartner = c.partner?._id === msg.sender;
-                    const isActive = activeConvo && c.partner?._id === activeConvo.partner._id;
+                    const isActive = activeConvo && c.partner?._id === activeConvo.partner?._id;
 
                     let unreadInc = 0;
                     if (isFromPartner && !isActive) unreadInc = 1;
@@ -103,12 +106,16 @@ const AdminMessages = () => {
                 return c;
             }));
 
-            if (activeConvo && (msg.sender === activeConvo.partner._id || msg.receiver === activeConvo.partner._id)) {
-                setMessages(prev => [...prev, msg]);
+            if (activeConvo && (msg.sender === activeConvo.partner?._id || msg.receiver === activeConvo.partner?._id)) {
+                // Fix: Only add to messages if it's NOT from the current user (to avoid double messages)
+                // because handleSend already adds the message locally.
+                if (msg.sender !== user?._id && msg.sender?._id !== user?._id) {
+                    setMessages(prev => [...prev, msg]);
+                }
 
                 // If we received this while active in the chat, mark it as read immediately in the backend
-                if (msg.sender === activeConvo.partner._id) {
-                    messageAPI.markAsRead(activeConvo.partner._id).catch(() => { });
+                if (msg.sender === activeConvo.partner?._id) {
+                    messageAPI.markAsRead(activeConvo.partner?._id).catch(() => { });
                 }
             }
         };
@@ -124,7 +131,7 @@ const AdminMessages = () => {
         setSendingMsg(true);
         try {
             const { data } = await messageAPI.send({
-                receiverId: activeConvo.partner._id,
+                receiverId: activeConvo.partner?._id,
                 text: newMessage.trim(),
             });
             setMessages(prev => [...prev, data.message]);
@@ -133,8 +140,8 @@ const AdminMessages = () => {
             const socket = getSocket();
             if (socket) {
                 socket.emit('message:send', {
-                    senderId: user._id,
-                    receiverId: activeConvo.partner._id,
+                    senderId: user?._id,
+                    receiverId: activeConvo.partner?._id,
                     text: newMessage.trim(),
                 });
             }
@@ -176,7 +183,7 @@ const AdminMessages = () => {
                                                 key={convo.partner?._id || i}
                                                 onClick={() => setActiveConvo(convo)}
                                                 className={`flex items-center gap-3 p-3 cursor-pointer transition-colors
-                          ${activeConvo?.partner?._id === convo.partner?._id ? 'bg-primary-light' : 'hover:bg-gray-50'}`}
+                          ${activeConvo?.partner?._id === convo?.partner?._id ? 'bg-primary-light' : 'hover:bg-gray-50'}`}
                                             >
                                                 <div className="w-10 h-10 rounded-xl bg-primary-light flex items-center justify-center text-xl flex-shrink-0 overflow-hidden">
                                                     {convo.partner?.profilePic ? (
@@ -186,7 +193,7 @@ const AdminMessages = () => {
                                                     )}
                                                 </div>
                                                 <div className="flex-1 min-w-0">
-                                                    <p className="text-sm font-semibold text-text-primary truncate">{convo.partner?.name}</p>
+                                                    <p className="text-sm font-semibold text-text-primary truncate">{convo.partner?.name || 'Patient'}</p>
                                                     <p className="text-xs text-text-secondary truncate">{convo.lastMessage?.text || 'Start a conversation'}</p>
                                                 </div>
                                                 {convo.unreadCount > 0 && (
@@ -220,7 +227,7 @@ const AdminMessages = () => {
                                                     )}
                                                 </div>
                                                 <div>
-                                                    <p className="font-semibold text-text-primary text-sm">{activeConvo.partner?.name}</p>
+                                                    <p className="font-semibold text-text-primary text-sm">{activeConvo.partner?.name || 'Patient'}</p>
                                                     <p className="text-xs text-success flex items-center gap-1">
                                                         <span className="w-2 h-2 bg-success rounded-full" /> Online
                                                     </p>
