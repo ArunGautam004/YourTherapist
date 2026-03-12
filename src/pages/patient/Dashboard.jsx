@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Calendar, BookOpen, MessageCircle, Settings,
   CalendarPlus, HeartPulse, MessageSquare, Video, Clock, ArrowRight,
@@ -8,7 +8,8 @@ import {
 } from 'lucide-react';
 import Sidebar from '../../components/layout/Sidebar';
 import { useAuth } from '../../context/AuthContext';
-import { appointmentAPI, moodAPI, sessionAPI } from '../../services/api';
+import { appointmentAPI, moodAPI, sessionAPI, notificationAPI } from '../../services/api';
+import { getSocket } from '../../services/socket';
 
 const fadeInUp = {
   hidden: { opacity: 0, y: 20 },
@@ -31,10 +32,84 @@ const patientLinks = [
 
 const PatientDashboard = () => {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [appointments, setAppointments] = useState([]);
   const [moodData, setMoodData] = useState({ entries: [], stats: {} });
-  const [sessionNotes, setSessionNotes] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // ── Notifications (real data, same bell UI as before) ──────────────────
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const notifRef = useRef(null);
+
+  useEffect(() => {
+    notificationAPI.getAll()
+      .then(({ data }) => {
+        setNotifications(data.notifications || []);
+        setUnreadCount(data.unreadCount || 0);
+      })
+      .catch(() => {});
+  }, []);
+
+  // Real-time: new notification arrives via socket
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket) return;
+    const onNew = (notif) => {
+      setNotifications(prev => [notif, ...prev].slice(0, 50));
+      setUnreadCount(prev => prev + 1);
+    };
+    socket.on('notification:new', onNew);
+    return () => socket.off('notification:new', onNew);
+  }, []);
+
+  // Close on outside click
+  useEffect(() => {
+    const handler = (e) => {
+      if (notifRef.current && !notifRef.current.contains(e.target)) {
+        setShowNotifications(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const handleBellClick = async () => {
+    const opening = !showNotifications;
+    setShowNotifications(opening);
+    if (opening && unreadCount > 0) {
+      try {
+        await notificationAPI.markAllRead();
+        setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+        setUnreadCount(0);
+      } catch (e) { /* silent */ }
+    }
+  };
+
+  const handleNotifClick = async (notif) => {
+    if (!notif.read) {
+      try {
+        await notificationAPI.markOneRead(notif._id);
+        setNotifications(prev => prev.map(n => n._id === notif._id ? { ...n, read: true } : n));
+        setUnreadCount(prev => Math.max(0, prev - 1));
+      } catch (e) { /* silent */ }
+    }
+    setShowNotifications(false);
+    if (notif.link) navigate(notif.link);
+  };
+
+  const timeAgo = (dateStr) => {
+    const diff = Date.now() - new Date(dateStr).getTime();
+    const mins = Math.floor(diff / 60000);
+    const hours = Math.floor(diff / 3600000);
+    const days = Math.floor(diff / 86400000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    if (hours < 24) return `${hours}h ago`;
+    return `${days}d ago`;
+  };
+  // ──────────────────────────────────────────────────────────────────────
 
   useEffect(() => {
     const fetchData = async () => {
@@ -43,10 +118,9 @@ const PatientDashboard = () => {
           sessionAPI.getMyHistory().catch(() => ({ data: { sessions: [] } })),
           moodAPI.getEntries(7).catch(() => ({ data: { entries: [], stats: {} } })),
         ]);
-        
+
         const allApts = (historyRes.data.sessions || []).map(s => s.appointment);
-        
-        // Filter for upcoming or ongoing
+
         const activeApts = allApts.filter(apt => {
           if (apt.status === 'cancelled' || apt.status === 'completed' || apt.status === 'no-show') return false;
           const aptDate = new Date(apt.date || Date.now());
@@ -54,16 +128,15 @@ const PatientDashboard = () => {
           let tH = 12, tM = 0;
           const timeMatch = timeStr.match(/(\d+):?(\d+)?/);
           if (timeMatch) {
-              tH = parseInt(timeMatch[1], 10);
-              tM = parseInt(timeMatch[2] || '0', 10);
+            tH = parseInt(timeMatch[1], 10);
+            tM = parseInt(timeMatch[2] || '0', 10);
           }
           if (timeStr.includes('PM') && tH < 12) tH += 12;
           if (timeStr.includes('AM') && tH === 12) tH = 0;
           aptDate.setHours(tH, tM, 0, 0);
-          
           const endTime = new Date(aptDate.getTime() + (apt.duration || 50) * 60000);
           return new Date() < endTime;
-        }).sort((a,b) => new Date(a.date) - new Date(b.date));
+        }).sort((a, b) => new Date(a.date) - new Date(b.date));
 
         setAppointments(activeApts.slice(0, 3));
         setMoodData(moodRes.data || { entries: [], stats: {} });
@@ -83,13 +156,6 @@ const PatientDashboard = () => {
   ];
 
   const moodEmojis = ['😢', '😟', '😐', '😐', '🙂', '😊', '😊', '😄', '🤩', '🤩'];
-
-  const [showNotifications, setShowNotifications] = useState(false);
-  const [notifications, setNotifications] = useState([
-    { id: 1, title: 'Welcome!', desc: 'Welcome to YourTherapist', time: 'Just now', read: false }
-  ]);
-
-  const unreadCount = notifications.filter(n => !n.read).length;
 
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -113,13 +179,10 @@ const PatientDashboard = () => {
               <p className="text-text-secondary mt-1">Here's an overview of your mental wellness journey.</p>
             </div>
 
-            {/* Notification Dropdown */}
-            <div className="relative">
+            {/* Bell — same look, now real data */}
+            <div className="relative" ref={notifRef}>
               <button
-                onClick={() => {
-                  setShowNotifications(!showNotifications);
-                  setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-                }}
+                onClick={handleBellClick}
                 className="hidden md:flex p-2.5 rounded-2xl bg-white shadow-soft hover:shadow-soft-lg transition-all relative"
               >
                 <Bell className="w-5 h-5 text-text-secondary" />
@@ -138,14 +201,26 @@ const PatientDashboard = () => {
                   >
                     <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
                       <h3 className="font-semibold text-text-primary">Notifications</h3>
+                      {notifications.length > 0 && (
+                        <span className="text-xs text-text-secondary">{notifications.length} total</span>
+                      )}
                     </div>
                     <div className="max-h-80 overflow-y-auto p-2">
                       {notifications.length > 0 ? (
                         notifications.map(notif => (
-                          <div key={notif.id} className="p-3 hover:bg-gray-50 rounded-xl transition-colors cursor-pointer">
-                            <p className="text-sm font-medium text-text-primary">{notif.title}</p>
-                            <p className="text-xs text-text-secondary mt-0.5">{notif.desc}</p>
-                            <p className="text-[10px] text-text-secondary/60 mt-2">{notif.time}</p>
+                          <div
+                            key={notif._id}
+                            onClick={() => handleNotifClick(notif)}
+                            className={`p-3 hover:bg-gray-50 rounded-xl transition-colors cursor-pointer ${!notif.read ? 'bg-primary-light/30' : ''}`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <p className={`text-sm ${!notif.read ? 'font-semibold text-text-primary' : 'font-medium text-text-secondary'}`}>
+                                {notif.title}
+                              </p>
+                              {!notif.read && <span className="flex-shrink-0 w-2 h-2 bg-primary rounded-full mt-1.5" />}
+                            </div>
+                            <p className="text-xs text-text-secondary mt-0.5 line-clamp-2">{notif.message}</p>
+                            <p className="text-[10px] text-text-secondary/60 mt-2">{timeAgo(notif.createdAt)}</p>
                           </div>
                         ))
                       ) : (
@@ -192,30 +267,23 @@ const PatientDashboard = () => {
                   {[...appointments].map(apt => {
                     const safeDate = new Date(apt.date);
                     const isValidDate = !isNaN(safeDate);
-
                     let aptDate = new Date();
                     let endTime = new Date();
                     if (isValidDate) {
                       const localY = safeDate.getFullYear();
                       const localM = safeDate.getMonth();
                       const localD = safeDate.getDate();
-
-                          const [timeStr, period] = (apt.time || '12:00 PM').split(' ');
-                          let [h, m] = timeStr.split(':').map(Number);
-                          if (period === 'PM' && h !== 12) h += 12;
-                          if (period === 'AM' && h === 12) h = 0;
-              
-                          aptDate = new Date(localY, localM, localD, h, m || 0, 0, 0);
-                          endTime = new Date(aptDate.getTime() + (apt.duration || 50) * 60000);
+                      const [timeStr, period] = (apt.time || '12:00 PM').split(' ');
+                      let [h, m] = timeStr.split(':').map(Number);
+                      if (period === 'PM' && h !== 12) h += 12;
+                      if (period === 'AM' && h === 12) h = 0;
+                      aptDate = new Date(localY, localM, localD, h, m || 0, 0, 0);
+                      endTime = new Date(aptDate.getTime() + (apt.duration || 50) * 60000);
                     }
-
                     const now = new Date();
                     const diff = isValidDate ? (aptDate - now) / 60000 : Infinity;
-
-                    // A session is ongoing if it's within 10 mins of starting OR it has started but hasn't ended yet
                     const isOngoing = isValidDate && diff <= 10 && now < endTime && apt.status !== 'cancelled';
                     const isPast = ['completed', 'cancelled', 'no-show'].includes(apt.status) || (isValidDate && now >= endTime);
-
                     return { ...apt, aptDate, safeDate, isValidDate, diff, isOngoing, isPast };
                   })
                     .filter(apt => !apt.isPast)
@@ -224,37 +292,34 @@ const PatientDashboard = () => {
                       if (!a.isOngoing && b.isOngoing) return 1;
                       return (a.aptDate.getTime() || 0) - (b.aptDate.getTime() || 0);
                     })
-                    .map((apt) => {
-
-                      return (
-                        <div key={apt._id} className="flex items-center gap-3 p-3 rounded-2xl bg-gray-50 hover:bg-primary-light/20 transition-colors">
-                          <div className="w-12 h-12 rounded-xl bg-primary-light flex items-center justify-center">
-                            <span className="text-xl">👨‍⚕️</span>
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold text-text-primary">{apt.doctor?.name || 'Dr. Therapist'}</p>
-                            <p className="text-xs text-text-secondary">{apt.doctor?.specialization || 'Clinical Psychologist'}</p>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-sm font-semibold text-text-primary">
-                              {apt.isValidDate ? apt.safeDate.toLocaleDateString('en', { month: 'short', day: 'numeric' }) : 'Unknown Date'}
-                            </p>
-                            <p className="text-xs text-text-secondary flex items-center gap-1 justify-end">
-                              <Clock className="w-3 h-3" /> {apt.time}
-                            </p>
-                          </div>
-                          {apt.meetingLink && apt.isOngoing ? (
-                            <Link to={apt.meetingLink} className="btn-primary !px-3 !py-1.5 text-xs flex items-center gap-1">
-                              <Video className="w-3.5 h-3.5" /> Join
-                            </Link>
-                          ) : (
-                            <span className={`text-xs px-3 py-1.5 rounded-xl font-medium ${apt.isOngoing ? 'bg-success/10 text-success shadow-sm' : 'bg-primary-light/50 text-primary'}`}>
-                              {apt.isOngoing ? 'Ongoing' : (apt.diff > 60 ? `In ${Math.ceil(apt.diff / 60) > 24 ? Math.ceil(apt.diff / 1440) + 'd' : Math.ceil(apt.diff / 60) + 'h'}` : `In ${Math.ceil(apt.diff)}m`)}
-                            </span>
-                          )}
+                    .map((apt) => (
+                      <div key={apt._id} className="flex items-center gap-3 p-3 rounded-2xl bg-gray-50 hover:bg-primary-light/20 transition-colors">
+                        <div className="w-12 h-12 rounded-xl bg-primary-light flex items-center justify-center">
+                          <span className="text-xl">👨‍⚕️</span>
                         </div>
-                      );
-                    })}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-text-primary">{apt.doctor?.name || 'Dr. Therapist'}</p>
+                          <p className="text-xs text-text-secondary">{apt.doctor?.specialization || 'Clinical Psychologist'}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-sm font-semibold text-text-primary">
+                            {apt.isValidDate ? apt.safeDate.toLocaleDateString('en', { month: 'short', day: 'numeric' }) : 'Unknown Date'}
+                          </p>
+                          <p className="text-xs text-text-secondary flex items-center gap-1 justify-end">
+                            <Clock className="w-3 h-3" /> {apt.time}
+                          </p>
+                        </div>
+                        {apt.meetingLink && apt.isOngoing ? (
+                          <Link to={apt.meetingLink} className="btn-primary !px-3 !py-1.5 text-xs flex items-center gap-1">
+                            <Video className="w-3.5 h-3.5" /> Join
+                          </Link>
+                        ) : (
+                          <span className={`text-xs px-3 py-1.5 rounded-xl font-medium ${apt.isOngoing ? 'bg-success/10 text-success shadow-sm' : 'bg-primary-light/50 text-primary'}`}>
+                            {apt.isOngoing ? 'Ongoing' : (apt.diff > 60 ? `In ${Math.ceil(apt.diff / 60) > 24 ? Math.ceil(apt.diff / 1440) + 'd' : Math.ceil(apt.diff / 60) + 'h'}` : `In ${Math.ceil(apt.diff)}m`)}
+                          </span>
+                        )}
+                      </div>
+                    ))}
                 </div>
               ) : (
                 <div className="text-center py-8">

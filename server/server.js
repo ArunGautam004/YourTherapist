@@ -18,6 +18,9 @@ import messageRoutes from './routes/messages.js';
 import sessionRoutes from './routes/sessions.js';
 import uploadRoutes from './routes/upload.js';
 import { startReminderJob } from './utils/reminderJob.js';
+import notificationRoutes from './routes/notificationRoutes.js';
+import { startReminderScheduler } from './utils/reminderScheduler.js';
+
 
 // Load env
 dotenv.config();
@@ -57,6 +60,10 @@ app.use('/api/mood', moodRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/sessions', sessionRoutes);
 app.use('/api/upload', uploadRoutes);
+app.use('/api/notifications', notificationRoutes);
+
+app.set('io', io);
+startReminderScheduler(io);
 
 // Health check
 app.get('/api/health', (req, res) => {

@@ -1,31 +1,51 @@
 import Message from '../models/Message.js';
 import Appointment from '../models/Appointment.js';
-const onlineUsers = new Map(); // userId -> socketId
+import { createNotification } from '../controllers/notificationController.js';
 
-// ✅ FIX #1: roomsMap must be OUTSIDE the connection handler
-// Previously it was inside, so every new socket got a fresh empty map
-// and could never see other participants.
-const roomsMap = new Map(); // roomId -> { doctorId, patientId, participants: Map<socketId, {userId, name, role}> }
+const onlineUsers = new Map(); // userId -> socketId
+const roomsMap = new Map();    // roomId -> { doctorId, patientId, participants }
 
 const initSocket = (io) => {
   io.on('connection', (socket) => {
     console.log(`🔌 Socket connected: ${socket.id}`);
 
-    // ====== USER ONLINE ======
+    // ── USER ONLINE ──────────────────────────────────────────────────────
+    // Each user joins a private room 'user:<userId>' so we can push
+    // targeted notifications to them regardless of which page they're on.
     socket.on('user:online', (userId) => {
       onlineUsers.set(userId, socket.id);
+      socket.join(`user:${userId}`); // ✅ private notification room
       io.emit('user:status', { userId, online: true });
       console.log(`👤 User online: ${userId}`);
     });
 
-    // ====== MESSAGING (DMs) ======
+    // ── DM MESSAGING ────────────────────────────────────────────────────
     socket.on('message:send', async (data) => {
       try {
-        const { senderId, receiverId, text } = data;
+        const { senderId, receiverId, text, senderName } = data;
+
         const message = await Message.create({ sender: senderId, receiver: receiverId, text });
+
+        // Deliver to receiver if online
         const receiverSocket = onlineUsers.get(receiverId);
-        if (receiverSocket) io.to(receiverSocket).emit('message:receive', message);
+        if (receiverSocket) {
+          io.to(receiverSocket).emit('message:receive', message);
+        }
         socket.emit('message:sent', message);
+
+        // ✅ New-message notification to receiver
+        const displayName = senderName || 'Someone';
+        const notif = await createNotification({
+          userId: receiverId,
+          type: 'new_message',
+          title: `💬 New message from ${displayName}`,
+          message: text.length > 70 ? text.slice(0, 70) + '…' : text,
+          link: '/patient/messages',
+          meta: { senderId, senderName: displayName },
+        });
+        if (notif) {
+          io.to(`user:${receiverId}`).emit('notification:new', notif);
+        }
       } catch (error) {
         socket.emit('error', { message: 'Failed to send message' });
       }
@@ -40,10 +60,7 @@ const initSocket = (io) => {
       if (senderSocket) io.to(senderSocket).emit('message:read-ack', { by: receiverId });
     });
 
-    // ====== VIDEO CALL SIGNALING ======
-
-    // ✅ FIX #3: Accept userId, name, role from the client so we can
-    // broadcast participant info to the other person
+    // ── VIDEO CALL SIGNALING ─────────────────────────────────────────────
     socket.on('call:join-room', ({ roomId, role, userId, name }) => {
       socket.join(roomId);
 
@@ -51,14 +68,13 @@ const initSocket = (io) => {
         roomsMap.set(roomId, {
           doctorId: null,
           patientId: null,
-          participants: new Map(), // socketId -> { userId, name, role }
+          participants: new Map(),
         });
       }
 
       const room = roomsMap.get(roomId);
       const isDoc = role === 'doctor' || role === 'admin';
 
-      // Store participant info
       room.participants.set(socket.id, { userId, name, role });
 
       if (isDoc) {
@@ -66,29 +82,23 @@ const initSocket = (io) => {
         io.to(`${roomId}-waiting`).emit('call:room-status', { hasDoctor: true });
       } else {
         room.patientId = socket.id;
-        // Mark patient as joined in the database
         Appointment.findOneAndUpdate(
           { meetingLink: `/session/${roomId}` },
           { patientJoined: true }
-        ).catch(err => console.error('Failed to update patientJoined status:', err));
+        ).catch(err => console.error('Failed to update patientJoined:', err));
       }
 
       console.log(`📹 ${name || role} joined room ${roomId}`);
 
-      const participant = { userId, name, role, socketId: socket.id };
+      socket.to(roomId).emit('call:user-joined', {
+        participant: { userId, name, role, socketId: socket.id },
+      });
 
-      // Notify the *other* person already in the room that someone joined
-      socket.to(roomId).emit('call:user-joined', { participant });
-
-      // If both are now present, tell everyone call:ready with full participant list
       if (room.doctorId && room.patientId) {
-        const participantList = Array.from(room.participants.entries()).map(
-          ([, info]) => info
-        );
+        const participantList = Array.from(room.participants.values());
         io.to(roomId).emit('call:ready', { participants: participantList });
-        console.log(`✅ Room ${roomId} is ready — both participants connected`);
+        console.log(`✅ Room ${roomId} ready — both participants present`);
       } else if (!isDoc && !room.doctorId) {
-        // Patient waiting, no doctor yet
         socket.emit('call:waiting-for-doctor');
       }
     });
@@ -99,14 +109,11 @@ const initSocket = (io) => {
       socket.emit('call:room-status', { hasDoctor: !!(room && room.doctorId) });
     });
 
-    // WebRTC signaling — relay to everyone else in the room
     socket.on('call:offer', ({ roomId, offer }) => {
-      console.log(`📡 Relaying offer in room ${roomId}`);
       socket.to(roomId).emit('call:offer', { offer, from: socket.id });
     });
 
     socket.on('call:answer', ({ roomId, answer }) => {
-      console.log(`📡 Relaying answer in room ${roomId}`);
       socket.to(roomId).emit('call:answer', { answer, from: socket.id });
     });
 
@@ -114,7 +121,6 @@ const initSocket = (io) => {
       socket.to(roomId).emit('call:ice-candidate', { candidate, from: socket.id });
     });
 
-    // Support both call:end({ roomId }) and call:end(roomId) for compatibility
     socket.on('call:end', (payload) => {
       const roomId = typeof payload === 'string' ? payload : payload?.roomId;
       if (!roomId) return;
@@ -136,16 +142,13 @@ const initSocket = (io) => {
       }
     });
 
-    // ====== SESSION CHAT ======
-    // ✅ FIX #2: room:message was completely missing from the server.
-    // The client emits it but it was never relayed — so only the sender saw their message.
+    // ── SESSION ROOM CHAT ────────────────────────────────────────────────
     socket.on('room:message', ({ roomId, message }) => {
-      // Broadcast to everyone ELSE in the room (sender already added it locally)
       socket.to(roomId).emit('room:message', message);
-      console.log(`💬 Message in room ${roomId}: ${message.text}`);
+      console.log(`💬 Room message in ${roomId}: ${message.text}`);
     });
 
-    // ====== LIVE QUESTIONNAIRE ======
+    // ── LIVE QUESTIONNAIRE ───────────────────────────────────────────────
     socket.on('questionnaire:push', ({ roomId, questionnaire }) => {
       socket.to(roomId).emit('questionnaire:receive', questionnaire);
     });
@@ -154,9 +157,8 @@ const initSocket = (io) => {
       socket.to(roomId).emit('questionnaire:response', responses);
     });
 
-    // ====== DISCONNECT ======
+    // ── DISCONNECT ───────────────────────────────────────────────────────
     socket.on('disconnect', () => {
-      // Clean up all rooms this socket was in
       for (const [roomId, room] of roomsMap.entries()) {
         if (!room.participants.has(socket.id)) continue;
 
@@ -169,13 +171,11 @@ const initSocket = (io) => {
         }
         if (room.patientId === socket.id) room.patientId = null;
 
-        // Tell the other person who left
         socket.to(roomId).emit('call:ended', { participant });
 
         if (!room.doctorId && !room.patientId) roomsMap.delete(roomId);
       }
 
-      // Remove from online users
       for (const [userId, sockId] of onlineUsers.entries()) {
         if (sockId === socket.id) {
           onlineUsers.delete(userId);

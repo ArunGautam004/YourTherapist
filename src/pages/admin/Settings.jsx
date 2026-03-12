@@ -2,8 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
     LayoutDashboard, Users, Calendar, BarChart3, MessageCircle, Settings,
-    Save, Loader2, Camera, Phone, User, Mail, MapPin,
-    Shield, Key, Briefcase, Clock, DollarSign, Plus, Trash2, Upload, ClipboardList
+    Save, Loader2, Camera, Mail,
+    Shield, Key, Briefcase, Clock, Upload, ClipboardList, User
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Sidebar from '../../components/layout/Sidebar';
@@ -38,7 +38,7 @@ const AdminSettings = () => {
         experience: 0,
         bio: '',
         consultationFee: 1500,
-        availableSlots: [],
+        chatFee: 800,
     });
 
     useEffect(() => {
@@ -53,7 +53,7 @@ const AdminSettings = () => {
                 experience: user.experience || 0,
                 bio: user.bio || '',
                 consultationFee: user.consultationFee || 1500,
-                availableSlots: user.availableSlots || [],
+                chatFee: user.chatFee || 800,
             });
         }
         messageAPI.getConversations().then(({ data }) => {
@@ -78,22 +78,18 @@ const AdminSettings = () => {
     const handleFileUpload = async (e) => {
         const file = e.target.files?.[0];
         if (!file) return;
-
         if (file.size > 5 * 1024 * 1024) {
             toast.error('Image must be less than 5MB');
             return;
         }
-
         const formData = new FormData();
         formData.append('image', file);
-
         setUploadingImage(true);
         try {
             const { data } = await uploadAPI.uploadImage(formData);
             setForm(prev => ({ ...prev, profilePic: data.url }));
             toast.success('Image uploaded successfully');
         } catch (err) {
-            console.error(err);
             toast.error('Failed to upload image. Try pasting a URL instead.');
         } finally {
             setUploadingImage(false);
@@ -101,34 +97,12 @@ const AdminSettings = () => {
         }
     };
 
-    const addSlot = () => {
-        setForm({
-            ...form,
-            availableSlots: [...form.availableSlots, { day: 'Monday', startTime: '09:00', endTime: '17:00' }],
-        });
-    };
-
-    const removeSlot = (index) => {
-        setForm({
-            ...form,
-            availableSlots: form.availableSlots.filter((_, i) => i !== index),
-        });
-    };
-
-    const updateSlot = (index, field, value) => {
-        const slots = [...form.availableSlots];
-        slots[index] = { ...slots[index], [field]: value };
-        setForm({ ...form, availableSlots: slots });
-    };
-
+    // ── Tabs: availability removed — managed in Calendar page ─────────────
     const tabs = [
-        { id: 'profile', label: 'Profile', icon: User },
+        { id: 'profile',  label: 'Profile',  icon: User },
         { id: 'practice', label: 'Practice', icon: Briefcase },
-        { id: 'availability', label: 'Availability', icon: Clock },
         { id: 'security', label: 'Security', icon: Shield },
     ];
-
-    const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
     return (
         <div className="min-h-screen bg-background">
@@ -164,7 +138,7 @@ const AdminSettings = () => {
                             <div className="card">
                                 <h3 className="font-display font-bold text-lg text-text-primary mb-5">Profile Photo</h3>
                                 <div className="flex items-center gap-5">
-                                    <div className="w-20 h-20 rounded-2xl bg-primary-light flex items-center justify-center overflow-hidden border-2 border-primary/20 flex-shrink-0 relative group">
+                                    <div className="w-20 h-20 rounded-2xl bg-primary-light flex items-center justify-center overflow-hidden border-2 border-primary/20 flex-shrink-0">
                                         {uploadingImage ? (
                                             <Loader2 className="w-6 h-6 text-primary animate-spin" />
                                         ) : form.profilePic ? (
@@ -187,19 +161,12 @@ const AdminSettings = () => {
                                                 onClick={() => fileInputRef.current?.click()}
                                                 disabled={uploadingImage}
                                                 className="btn-outline !py-2 !px-3 flex items-center gap-2 flex-shrink-0"
-                                                title="Upload Image"
                                             >
                                                 <Upload className="w-4 h-4" /> Upload
                                             </button>
-                                            <input
-                                                type="file"
-                                                ref={fileInputRef}
-                                                onChange={handleFileUpload}
-                                                accept="image/*"
-                                                className="hidden"
-                                            />
+                                            <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*" className="hidden" />
                                         </div>
-                                        <p className="text-xs text-text-secondary mt-1">Enter a URL or upload a file (max 5MB)</p>
+                                        <p className="text-xs text-text-secondary">Enter a URL or upload a file (max 5MB)</p>
                                     </div>
                                 </div>
                             </div>
@@ -235,71 +202,52 @@ const AdminSettings = () => {
 
                     {/* Practice Tab */}
                     {activeTab === 'practice' && (
-                        <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="card">
-                            <h3 className="font-display font-bold text-lg text-text-primary mb-5">Practice Settings</h3>
-                            <div className="grid md:grid-cols-2 gap-4">
-                                <div>
-                                    <label className="text-sm font-medium text-text-secondary mb-1.5 block">Specialization</label>
-                                    <input type="text" value={form.specialization} onChange={(e) => setForm({ ...form, specialization: e.target.value })} placeholder="e.g. Clinical Psychologist" className="input-field" />
+                        <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-6">
+                            <div className="card">
+                                <h3 className="font-display font-bold text-lg text-text-primary mb-5">Practice Details</h3>
+                                <div className="grid md:grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="text-sm font-medium text-text-secondary mb-1.5 block">Specialization</label>
+                                        <input type="text" value={form.specialization} onChange={(e) => setForm({ ...form, specialization: e.target.value })} placeholder="e.g. Clinical Psychologist" className="input-field" />
+                                    </div>
+                                    <div>
+                                        <label className="text-sm font-medium text-text-secondary mb-1.5 block">License Number</label>
+                                        <input type="text" value={form.license} onChange={(e) => setForm({ ...form, license: e.target.value })} className="input-field" />
+                                    </div>
+                                    <div>
+                                        <label className="text-sm font-medium text-text-secondary mb-1.5 block">Years of Experience</label>
+                                        <input type="number" value={form.experience} onChange={(e) => setForm({ ...form, experience: Number(e.target.value) })} min="0" className="input-field" />
+                                    </div>
+                                    <div>
+                                        <label className="text-sm font-medium text-text-secondary mb-1.5 block">Consultation Fee (₹)</label>
+                                        <input type="number" value={form.consultationFee} onChange={(e) => setForm({ ...form, consultationFee: Number(e.target.value) })} min="0" className="input-field" />
+                                    </div>
+                                    <div>
+                                        <label className="text-sm font-medium text-text-secondary mb-1.5 block">Chat Fee (₹)</label>
+                                        <input type="number" value={form.chatFee} onChange={(e) => setForm({ ...form, chatFee: Number(e.target.value) })} min="0" className="input-field" />
+                                    </div>
+                                    <div className="md:col-span-2">
+                                        <label className="text-sm font-medium text-text-secondary mb-1.5 block">Bio</label>
+                                        <textarea value={form.bio} onChange={(e) => setForm({ ...form, bio: e.target.value })} placeholder="Tell patients about yourself..." rows={4} className="input-field resize-none" />
+                                    </div>
                                 </div>
-                                <div>
-                                    <label className="text-sm font-medium text-text-secondary mb-1.5 block">License Number</label>
-                                    <input type="text" value={form.license} onChange={(e) => setForm({ ...form, license: e.target.value })} className="input-field" />
-                                </div>
-                                <div>
-                                    <label className="text-sm font-medium text-text-secondary mb-1.5 block">Years of Experience</label>
-                                    <input type="number" value={form.experience} onChange={(e) => setForm({ ...form, experience: Number(e.target.value) })} min="0" className="input-field" />
-                                </div>
-                                <div>
-                                    <label className="text-sm font-medium text-text-secondary mb-1.5 block">Consultation Fee (₹)</label>
-                                    <input type="number" value={form.consultationFee} onChange={(e) => setForm({ ...form, consultationFee: Number(e.target.value) })} min="0" className="input-field" />
-                                </div>
-                                <div className="md:col-span-2">
-                                    <label className="text-sm font-medium text-text-secondary mb-1.5 block">Bio</label>
-                                    <textarea value={form.bio} onChange={(e) => setForm({ ...form, bio: e.target.value })} placeholder="Tell patients about yourself..." rows={4} className="input-field resize-none" />
-                                </div>
-                            </div>
-                            <button onClick={handleSave} disabled={saving} className="btn-primary mt-6 flex items-center gap-2">
-                                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                                {saving ? 'Saving...' : 'Save Changes'}
-                            </button>
-                        </motion.div>
-                    )}
-
-                    {/* Availability Tab */}
-                    {activeTab === 'availability' && (
-                        <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="card">
-                            <div className="flex items-center justify-between mb-5">
-                                <h3 className="font-display font-bold text-lg text-text-primary">Availability Slots</h3>
-                                <button onClick={addSlot} className="btn-outline flex items-center gap-1 text-sm !py-2">
-                                    <Plus className="w-4 h-4" /> Add Slot
+                                <button onClick={handleSave} disabled={saving} className="btn-primary mt-6 flex items-center gap-2">
+                                    {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                                    {saving ? 'Saving...' : 'Save Changes'}
                                 </button>
                             </div>
 
-                            {form.availableSlots.length === 0 ? (
-                                <p className="text-center text-text-secondary text-sm py-8">No availability slots configured. Click "Add Slot" to get started.</p>
-                            ) : (
-                                <div className="space-y-3">
-                                    {form.availableSlots.map((slot, i) => (
-                                        <div key={i} className="flex items-center gap-3 p-3 rounded-xl bg-gray-50 border border-gray-100">
-                                            <select value={slot.day} onChange={(e) => updateSlot(i, 'day', e.target.value)} className="input-field !py-2 text-sm flex-1">
-                                                {days.map(d => <option key={d} value={d}>{d}</option>)}
-                                            </select>
-                                            <input type="time" value={slot.startTime} onChange={(e) => updateSlot(i, 'startTime', e.target.value)} className="input-field !py-2 text-sm w-32" />
-                                            <span className="text-text-secondary text-sm">to</span>
-                                            <input type="time" value={slot.endTime} onChange={(e) => updateSlot(i, 'endTime', e.target.value)} className="input-field !py-2 text-sm w-32" />
-                                            <button onClick={() => removeSlot(i)} className="p-2 rounded-lg hover:bg-danger/10 text-danger transition-colors">
-                                                <Trash2 className="w-4 h-4" />
-                                            </button>
-                                        </div>
-                                    ))}
+                            {/* Redirect hint */}
+                            <div className="flex items-start gap-3 p-4 rounded-2xl bg-primary-light/50 border border-primary/20">
+                                <Clock className="w-5 h-5 text-primary mt-0.5 flex-shrink-0" />
+                                <div>
+                                    <p className="text-sm font-semibold text-text-primary">Availability & Working Hours</p>
+                                    <p className="text-xs text-text-secondary mt-0.5">Manage your available days and time slots from the Calendar page.</p>
+                                    <a href="/admin/calendar" className="text-xs text-primary font-medium mt-1 inline-block hover:underline">
+                                        Go to Calendar →
+                                    </a>
                                 </div>
-                            )}
-
-                            <button onClick={handleSave} disabled={saving} className="btn-primary mt-6 flex items-center gap-2">
-                                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                                {saving ? 'Saving...' : 'Save Changes'}
-                            </button>
+                            </div>
                         </motion.div>
                     )}
 

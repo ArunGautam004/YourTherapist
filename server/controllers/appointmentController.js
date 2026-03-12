@@ -3,9 +3,10 @@ import crypto from 'crypto';
 import Appointment from '../models/Appointment.js';
 import User from '../models/User.js';
 import { sendEmail } from '../utils/sendEmail.js';
+import { confirmationPatientEmail, confirmationDoctorEmail } from '../utils/emailTemplates.js';
+import { createNotification } from '../controllers/notificationController.js';
 import { v4 as uuidv4 } from 'uuid';
 
-// Lazy-initialize Razorpay (avoids crash with placeholder keys)
 let _razorpay = null;
 function getRazorpay() {
   if (!_razorpay) {
@@ -17,7 +18,6 @@ function getRazorpay() {
   return _razorpay;
 }
 
-// Helper: generate time slots from doctor's available slot range
 function generateTimeSlots(startTime, endTime) {
   const slots = [];
   const parseTime = (t) => {
@@ -27,23 +27,23 @@ function generateTimeSlots(startTime, endTime) {
     if (period === 'AM' && h === 12) h = 0;
     return h * 60 + (m || 0);
   };
-
   let current = parseTime(startTime);
   const end = parseTime(endTime);
-
-  while (current + 50 <= end) { // 50-min sessions
+  while (current + 50 <= end) {
     const h = Math.floor(current / 60);
     const m = current % 60;
     const period = h >= 12 ? 'PM' : 'AM';
     const displayH = h > 12 ? h - 12 : h === 0 ? 12 : h;
     slots.push(`${displayH}:${m.toString().padStart(2, '0')} ${period}`);
-    current += 60; // 1 hour gap between slots
+    current += 60;
   }
-
   return slots;
 }
 
-// @desc    Create Razorpay order for appointment
+// Helper: get socket.io instance stored on app
+const getIo = (req) => req.app.get('io');
+
+// @desc    Create Razorpay order — appointment stays 'pending' until payment verified
 // @route   POST /api/appointments
 export const createAppointment = async (req, res, next) => {
   try {
@@ -52,7 +52,8 @@ export const createAppointment = async (req, res, next) => {
     const doctor = await User.findOne({ _id: doctorId, role: 'doctor' });
     if (!doctor) return res.status(404).json({ message: 'Doctor not found' });
 
-    // Check for time conflicts
+    // ── Only PAID appointments block a slot ─────────────────────────────
+    // Pending (abandoned payments) do NOT count as booked.
     const dayStart = new Date(date);
     dayStart.setHours(0, 0, 0, 0);
     const dayEnd = new Date(dayStart);
@@ -63,26 +64,20 @@ export const createAppointment = async (req, res, next) => {
       date: { $gte: dayStart, $lt: dayEnd },
       time,
       status: { $nin: ['cancelled', 'no-show'] },
+      paymentStatus: 'paid', // ✅ only block on confirmed payments
     });
     if (existing) return res.status(400).json({ message: 'This time slot is already booked' });
 
     const fee = type === 'chat' ? doctor.chatFee : doctor.consultationFee;
 
-    // Create Razorpay order
     const razorpayOrder = await getRazorpay().orders.create({
-      amount: fee * 100, // Razorpay uses paise
+      amount: fee * 100,
       currency: 'INR',
       receipt: `apt_${uuidv4().slice(0, 8)}`,
-      notes: {
-        patientId: req.user._id.toString(),
-        doctorId: doctorId,
-        date,
-        time,
-        type,
-      },
+      notes: { patientId: req.user._id.toString(), doctorId, date, time, type },
     });
 
-    // Create appointment with pending payment
+    // Create appointment as pending — NOT shown in dashboards yet
     const appointment = await Appointment.create({
       patient: req.user._id,
       doctor: doctorId,
@@ -110,13 +105,13 @@ export const createAppointment = async (req, res, next) => {
   }
 };
 
-// @desc    Verify Razorpay payment
+// @desc    Verify Razorpay payment — confirms appointment + sends all notifications
 // @route   POST /api/appointments/verify-payment
 export const verifyPayment = async (req, res, next) => {
   try {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature, appointmentId } = req.body;
 
-    // Verify signature
+    // Verify Razorpay signature
     const body = razorpay_order_id + '|' + razorpay_payment_id;
     const expectedSignature = crypto
       .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
@@ -124,10 +119,15 @@ export const verifyPayment = async (req, res, next) => {
       .digest('hex');
 
     if (expectedSignature !== razorpay_signature) {
+      // Signature mismatch — cancel the pending appointment so slot stays free
+      await Appointment.findByIdAndUpdate(appointmentId, {
+        paymentStatus: 'failed',
+        status: 'cancelled',
+      });
       return res.status(400).json({ message: 'Payment verification failed' });
     }
 
-    // Update appointment
+    // Mark appointment as paid — now it's officially booked
     const appointment = await Appointment.findById(appointmentId)
       .populate('doctor', 'name specialization email')
       .populate('patient', 'name email phone');
@@ -140,51 +140,95 @@ export const verifyPayment = async (req, res, next) => {
     await appointment.save();
 
     const dateStr = new Date(appointment.date).toLocaleDateString('en-IN', {
-      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
     });
 
-    // Send confirmation email to patient
+    const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const joinUrl = `${baseUrl}${appointment.meetingLink}`;
+
+    const aptData = {
+      patientName: appointment.patient.name,
+      doctorName: appointment.doctor.name,
+      dateStr,
+      time: appointment.time,
+      type: appointment.type,
+      fee: appointment.fee,
+    };
+
+    const io = getIo(req);
+
+    // ── 1. Confirmation email → patient ─────────────────────────────────
     try {
       await sendEmail({
         to: appointment.patient.email,
         subject: '✅ Appointment Confirmed — YourTherapist',
-        htmlContent: `
-          <div style="font-family:'Inter',Arial,sans-serif;max-width:500px;margin:0 auto;padding:32px;background:#f8faf9;border-radius:16px;">
-            <div style="text-align:center;margin-bottom:24px;">
-              <h1 style="color:#0d6b5e;font-size:24px;">YourTherapist</h1>
-              <p style="color:#666;">Appointment Confirmed! 🎉</p>
-            </div>
-            <div style="background:white;border-radius:12px;padding:24px;">
-              <p style="color:#333;font-size:16px;">Hello <strong>${appointment.patient.name}</strong>,</p>
-              <p style="color:#666;font-size:14px;">Your appointment has been successfully booked and paid.</p>
-              <div style="background:#f0fdf4;border-radius:12px;padding:20px;margin:16px 0;">
-                <table style="width:100%;font-size:14px;color:#333;">
-                  <tr><td style="padding:6px 0;color:#666;">Doctor</td><td style="padding:6px 0;font-weight:bold;">${appointment.doctor.name.startsWith('Dr.') ? appointment.doctor.name : `Dr. ${appointment.doctor.name}`}</td></tr>
-                  <tr><td style="padding:6px 0;color:#666;">Date</td><td style="padding:6px 0;font-weight:bold;">${dateStr}</td></tr>
-                  <tr><td style="padding:6px 0;color:#666;">Time</td><td style="padding:6px 0;font-weight:bold;">${appointment.time}</td></tr>
-                  <tr><td style="padding:6px 0;color:#666;">Type</td><td style="padding:6px 0;font-weight:bold;text-transform:capitalize;">${appointment.type}</td></tr>
-                  <tr><td style="padding:6px 0;color:#666;">Fee</td><td style="padding:6px 0;font-weight:bold;">₹${appointment.fee}</td></tr>
-                </table>
-              </div>
-              <p style="color:#999;font-size:12px;">You will receive a reminder email 5 minutes before your session. Please be ready on time.</p>
-            </div>
-          </div>
-        `,
+        htmlContent: confirmationPatientEmail(aptData),
       });
-    } catch (emailErr) {
-      console.error('⚠️ Confirmation email failed:', emailErr.message);
+    } catch (e) {
+      console.error('Patient confirmation email failed:', e.message);
     }
 
-    // Send confirmation message in chat
+    // ── 2. Confirmation email → doctor ──────────────────────────────────
+    try {
+      await sendEmail({
+        to: appointment.doctor.email,
+        subject: '📅 New Appointment Booked — YourTherapist',
+        htmlContent: confirmationDoctorEmail(aptData),
+      });
+    } catch (e) {
+      console.error('Doctor confirmation email failed:', e.message);
+    }
+
+    // ── 3. Auto chat message from doctor to patient ──────────────────────
     try {
       const Message = (await import('../models/Message.js')).default;
+      const doctorLabel = appointment.doctor.name.startsWith('Dr.')
+        ? appointment.doctor.name
+        : `Dr. ${appointment.doctor.name}`;
+
       await Message.create({
         sender: appointment.doctor._id,
         receiver: appointment.patient._id,
-        text: `Hello ${appointment.patient.name}, your appointment for ${dateStr} at ${appointment.time} is confirmed. I look forward to our session!`,
+        text: `Hello ${appointment.patient.name} 👋, your appointment on ${dateStr} at ${appointment.time} has been confirmed. Looking forward to our session!`,
       });
-    } catch (msgErr) {
-      console.error('⚠️ Confirmation chat message failed:', msgErr.message);
+
+      // Push to patient's socket so message appears live in chat
+      if (io) {
+        io.to(`user:${appointment.patient._id}`).emit('message:receive', {
+          sender: appointment.doctor._id,
+          senderName: doctorLabel,
+          text: `Your appointment on ${dateStr} at ${appointment.time} is confirmed.`,
+          createdAt: new Date(),
+        });
+      }
+    } catch (e) {
+      console.error('Auto chat message failed:', e.message);
+    }
+
+    // ── 4. In-app notification → patient ────────────────────────────────
+    const patientNotif = await createNotification({
+      userId: appointment.patient._id,
+      type: 'appointment_confirmed',
+      title: '✅ Appointment Confirmed',
+      message: `Your appointment with Dr. ${appointment.doctor.name} on ${dateStr} at ${appointment.time} is confirmed.`,
+      link: '/patient/sessions',
+      meta: { appointmentId: appointment._id },
+    });
+
+    // ── 5. In-app notification → doctor ─────────────────────────────────
+    const doctorNotif = await createNotification({
+      userId: appointment.doctor._id,
+      type: 'appointment_confirmed',
+      title: '📅 New Appointment',
+      message: `${appointment.patient.name} booked a session on ${dateStr} at ${appointment.time}.`,
+      link: `/admin/patients/${appointment.patient._id}`,
+      meta: { appointmentId: appointment._id },
+    });
+
+    // ── 6. Push notifications via socket ────────────────────────────────
+    if (io) {
+      if (patientNotif) io.to(`user:${appointment.patient._id}`).emit('notification:new', patientNotif);
+      if (doctorNotif) io.to(`user:${appointment.doctor._id}`).emit('notification:new', doctorNotif);
     }
 
     res.json({ message: 'Payment verified and appointment confirmed!', appointment });
@@ -193,7 +237,7 @@ export const verifyPayment = async (req, res, next) => {
   }
 };
 
-// @desc    Get user's appointments
+// @desc    Get user's appointments — ONLY paid shown in dashboards
 // @route   GET /api/appointments
 export const getAppointments = async (req, res, next) => {
   try {
@@ -207,8 +251,9 @@ export const getAppointments = async (req, res, next) => {
     }
 
     if (status) filter.status = status;
-    // Filter out failed payments unless we want to see them. Allowing 'paid' and 'pending' covers most actual bookings.
-    filter.paymentStatus = { $in: ['paid', 'pending'] };
+
+    // ✅ Only paid appointments appear in dashboards — never show pending/failed
+    filter.paymentStatus = 'paid';
 
     const appointments = await Appointment.find(filter)
       .populate('doctor', 'name specialization profilePic rating')
@@ -235,7 +280,8 @@ export const getAppointment = async (req, res, next) => {
 
     if (!appointment) return res.status(404).json({ message: 'Appointment not found' });
 
-    const isOwner = appointment.patient._id.toString() === req.user._id.toString() ||
+    const isOwner =
+      appointment.patient._id.toString() === req.user._id.toString() ||
       appointment.doctor._id.toString() === req.user._id.toString();
     if (!isOwner) return res.status(403).json({ message: 'Not authorized' });
 
@@ -251,13 +297,11 @@ export const updateAppointment = async (req, res, next) => {
   try {
     const { status, notes, cancelReason } = req.body;
     const appointment = await Appointment.findById(req.params.id);
-
     if (!appointment) return res.status(404).json({ message: 'Appointment not found' });
 
     if (status) appointment.status = status;
     if (notes) appointment.notes = notes;
     if (cancelReason) appointment.cancelReason = cancelReason;
-
     await appointment.save();
 
     const populated = await appointment.populate([
@@ -271,7 +315,7 @@ export const updateAppointment = async (req, res, next) => {
   }
 };
 
-// @desc    Get today's appointments for doctor
+// @desc    Get today's appointments for doctor — only paid
 // @route   GET /api/appointments/today
 export const getTodayAppointments = async (req, res, next) => {
   try {
@@ -284,7 +328,7 @@ export const getTodayAppointments = async (req, res, next) => {
       doctor: req.user._id,
       date: { $gte: today, $lt: tomorrow },
       status: { $nin: ['cancelled'] },
-      paymentStatus: { $in: ['paid', 'pending'] },
+      paymentStatus: 'paid', // ✅ only paid
     })
       .populate('patient', 'name email phone profilePic')
       .sort({ time: 1 });
@@ -304,37 +348,29 @@ export const getAvailableSlots = async (req, res, next) => {
     const doctor = await User.findById(doctorId);
     if (!doctor) return res.status(404).json({ message: 'Doctor not found' });
 
-    // Parse date string (YYYY-MM-DD) without UTC offset issues
     const [year, month, day] = date.split('-').map(Number);
-    const parsedDate = new Date(year, month - 1, day); // Local timezone
+    const parsedDate = new Date(year, month - 1, day);
     const dayOfWeek = parsedDate.toLocaleDateString('en', { weekday: 'long' });
 
-    // Get doctor's availability for this day
     const daySlot = doctor.availableSlots?.find(s => s.day === dayOfWeek);
-
     let allSlots = [];
-    if (daySlot) {
-      allSlots = generateTimeSlots(daySlot.startTime, daySlot.endTime);
-    }
+    if (daySlot) allSlots = generateTimeSlots(daySlot.startTime, daySlot.endTime);
 
-    // Find booked slots
     const dayStart = new Date(date);
     dayStart.setHours(0, 0, 0, 0);
     const dayEnd = new Date(dayStart);
     dayEnd.setDate(dayEnd.getDate() + 1);
 
+    // ✅ Only PAID appointments block slots
     const booked = await Appointment.find({
       doctor: doctorId,
       date: { $gte: dayStart, $lt: dayEnd },
       status: { $nin: ['cancelled', 'no-show'] },
+      paymentStatus: 'paid',
     }).select('time');
 
     const bookedTimes = booked.map(a => a.time);
-
-    const slots = allSlots.map(time => ({
-      time,
-      available: !bookedTimes.includes(time),
-    }));
+    const slots = allSlots.map(time => ({ time, available: !bookedTimes.includes(time) }));
 
     res.json({
       slots,

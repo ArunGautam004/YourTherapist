@@ -1,13 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Users, Calendar, BarChart3, MessageCircle, Settings,
-  Video, Clock, TrendingUp, AlertTriangle, ArrowRight, Bell, ClipboardList
+  Video, Clock, AlertTriangle, ArrowRight, Bell, ClipboardList
 } from 'lucide-react';
 import Sidebar from '../../components/layout/Sidebar';
 import { useAuth } from '../../context/AuthContext';
-import { appointmentAPI, patientAPI, messageAPI } from '../../services/api';
+import { appointmentAPI, patientAPI, messageAPI, notificationAPI } from '../../services/api';
+import { getSocket } from '../../services/socket';
 
 const fadeInUp = {
   hidden: { opacity: 0, y: 20 },
@@ -38,6 +39,80 @@ const AdminDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [totalUnreadMessages, setTotalUnreadMessages] = useState(0);
 
+  // ── Notifications (real data, same bell UI as before) ──────────────────
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const notifRef = useRef(null);
+
+  useEffect(() => {
+    notificationAPI.getAll()
+      .then(({ data }) => {
+        setNotifications(data.notifications || []);
+        setUnreadCount(data.unreadCount || 0);
+      })
+      .catch(() => {});
+  }, []);
+
+  // Real-time: new notification arrives via socket
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket) return;
+    const onNew = (notif) => {
+      setNotifications(prev => [notif, ...prev].slice(0, 50));
+      setUnreadCount(prev => prev + 1);
+    };
+    socket.on('notification:new', onNew);
+    return () => socket.off('notification:new', onNew);
+  }, []);
+
+  // Close on outside click
+  useEffect(() => {
+    const handler = (e) => {
+      if (notifRef.current && !notifRef.current.contains(e.target)) {
+        setShowNotifications(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const handleBellClick = async () => {
+    const opening = !showNotifications;
+    setShowNotifications(opening);
+    if (opening && unreadCount > 0) {
+      try {
+        await notificationAPI.markAllRead();
+        setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+        setUnreadCount(0);
+      } catch (e) { /* silent */ }
+    }
+  };
+
+  const handleNotifClick = async (notif) => {
+    if (!notif.read) {
+      try {
+        await notificationAPI.markOneRead(notif._id);
+        setNotifications(prev => prev.map(n => n._id === notif._id ? { ...n, read: true } : n));
+        setUnreadCount(prev => Math.max(0, prev - 1));
+      } catch (e) { /* silent */ }
+    }
+    setShowNotifications(false);
+    if (notif.link) navigate(notif.link);
+  };
+
+  const timeAgo = (dateStr) => {
+    const diff = Date.now() - new Date(dateStr).getTime();
+    const mins = Math.floor(diff / 60000);
+    const hours = Math.floor(diff / 3600000);
+    const days = Math.floor(diff / 86400000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    if (hours < 24) return `${hours}h ago`;
+    return `${days}d ago`;
+  };
+  // ──────────────────────────────────────────────────────────────────────
+
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -50,7 +125,6 @@ const AdminDashboard = () => {
         setTodaySessions(todayRes.data.appointments || []);
         setPatients(patientsRes.data.patients?.slice(0, 4) || []);
         setAnalytics(analyticsRes.data || null);
-
         const unread = (messagesRes.data.conversations || []).reduce((sum, c) => sum + (c.unreadCount || 0), 0);
         setTotalUnreadMessages(unread);
       } catch (err) {
@@ -62,7 +136,6 @@ const AdminDashboard = () => {
     fetchData();
   }, []);
 
-  // ✅ Navigate to patients page with selected patient
   const handlePatientClick = (patientId) => {
     navigate(`/admin/patients?selected=${patientId}`);
   };
@@ -85,14 +158,11 @@ const AdminDashboard = () => {
         if (tPeriod === 'PM' && tH !== 12) tH += 12;
         if (tPeriod === 'AM' && tH === 12) tH = 0;
         aptDate.setHours(tH, tM || 0, 0, 0);
-
         const endTime = new Date(aptDate.getTime() + (s.duration || 50) * 60000);
         const now = new Date();
         const diff = (aptDate - now) / 60000;
-
         const isOngoing = diff <= 10 && now < endTime && s.status !== 'cancelled';
         const isUpcoming = aptDate > now && s.status !== 'cancelled';
-
         return (isOngoing || isUpcoming) && !['completed', 'no-show'].includes(s.status);
       }).length,
       change: 'Ongoing & Upcoming',
@@ -123,13 +193,6 @@ const AdminDashboard = () => {
     return styles[status] || styles.scheduled;
   };
 
-  const [showNotifications, setShowNotifications] = useState(false);
-  const [notifications, setNotifications] = useState([
-    { id: 1, title: 'New Patient', desc: 'A new patient has registered', time: '10 min ago', read: false }
-  ]);
-
-  const unreadCount = notifications.filter(n => !n.read).length;
-
   const getGreeting = () => {
     const hour = new Date().getHours();
     if (hour < 12) return 'Good Morning';
@@ -151,13 +214,14 @@ const AdminDashboard = () => {
               <p className="text-text-secondary mt-1">Here's your practice overview for today.</p>
             </div>
 
-            <div className="relative">
-              <Link
-                to="/admin/messages"
-                className={`hidden md:flex p-2.5 rounded-2xl bg-white shadow-soft transition-all relative ${totalUnreadMessages > 0 ? 'bg-primary-light ring-2 ring-primary ring-offset-2' : 'hover:shadow-soft-lg'}`}
+            {/* Bell — same look, now real data */}
+            <div className="relative" ref={notifRef}>
+              <button
+                onClick={handleBellClick}
+                className={`hidden md:flex p-2.5 rounded-2xl bg-white shadow-soft transition-all relative ${unreadCount > 0 ? 'bg-primary-light ring-2 ring-primary ring-offset-2' : 'hover:shadow-soft-lg'}`}
               >
-                <Bell className={`w-5 h-5 ${totalUnreadMessages > 0 ? 'text-primary' : 'text-text-secondary'}`} />
-                {totalUnreadMessages > 0 && (
+                <Bell className={`w-5 h-5 ${unreadCount > 0 ? 'text-primary' : 'text-text-secondary'}`} />
+                {unreadCount > 0 && (
                   <>
                     <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-danger rounded-full border-2 border-white" />
                     <motion.span
@@ -167,7 +231,7 @@ const AdminDashboard = () => {
                     />
                   </>
                 )}
-              </Link>
+              </button>
 
               <AnimatePresence>
                 {showNotifications && (
@@ -179,14 +243,26 @@ const AdminDashboard = () => {
                   >
                     <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
                       <h3 className="font-semibold text-text-primary">Notifications</h3>
+                      {notifications.length > 0 && (
+                        <span className="text-xs text-text-secondary">{notifications.length} total</span>
+                      )}
                     </div>
                     <div className="max-h-80 overflow-y-auto p-2">
                       {notifications.length > 0 ? (
                         notifications.map(notif => (
-                          <div key={notif.id} className="p-3 hover:bg-gray-50 rounded-xl transition-colors cursor-pointer">
-                            <p className="text-sm font-medium text-text-primary">{notif.title}</p>
-                            <p className="text-xs text-text-secondary mt-0.5">{notif.desc}</p>
-                            <p className="text-[10px] text-text-secondary/60 mt-2">{notif.time}</p>
+                          <div
+                            key={notif._id}
+                            onClick={() => handleNotifClick(notif)}
+                            className={`p-3 hover:bg-gray-50 rounded-xl transition-colors cursor-pointer ${!notif.read ? 'bg-primary-light/30' : ''}`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <p className={`text-sm ${!notif.read ? 'font-semibold text-text-primary' : 'font-medium text-text-secondary'}`}>
+                                {notif.title}
+                              </p>
+                              {!notif.read && <span className="flex-shrink-0 w-2 h-2 bg-primary rounded-full mt-1.5" />}
+                            </div>
+                            <p className="text-xs text-text-secondary mt-0.5 line-clamp-2">{notif.message}</p>
+                            <p className="text-[10px] text-text-secondary/60 mt-2">{timeAgo(notif.createdAt)}</p>
                           </div>
                         ))
                       ) : (
@@ -238,23 +314,19 @@ const AdminDashboard = () => {
                             const localY = safeDate.getFullYear();
                             const localM = safeDate.getMonth();
                             const localD = safeDate.getDate();
-
                             const [tPart, tPeriod] = (session.time || '').split(' ');
                             let [tH, tM] = (tPart || '0:0').split(':').map(Number);
                             if (tPeriod === 'PM' && tH !== 12) tH += 12;
                             if (tPeriod === 'AM' && tH === 12) tH = 0;
-
                             aptDate = new Date(localY, localM, localD, tH, tM || 0, 0, 0);
                           }
                         }
                         const endTime = new Date(aptDate.getTime() + (session.duration || 50) * 60000);
                         const now = new Date();
                         const diff = (aptDate - now) / 60000;
-
                         const isOngoing = diff <= 10 && now < endTime && session.status !== 'cancelled';
                         const isPast = ['completed', 'cancelled', 'no-show'].includes(session.status) || now >= endTime;
                         const isUpcoming = aptDate > now && !isPast && !isOngoing;
-
                         let displayStatus = session.status;
                         if (session.status === 'cancelled') {
                           displayStatus = 'cancelled';
@@ -264,7 +336,6 @@ const AdminDashboard = () => {
                         } else if (isOngoing) {
                           displayStatus = 'ongoing';
                         }
-
                         return { ...session, isOngoing, isPast, isUpcoming, displayStatus, aptDate };
                       })
                       .sort((a, b) => {
@@ -281,11 +352,9 @@ const AdminDashboard = () => {
                           onClick={() => session.patient?._id && handlePatientClick(session.patient._id)}
                         >
                           <div className="w-10 h-10 rounded-xl bg-primary-light flex items-center justify-center text-xl flex-shrink-0 overflow-hidden">
-                            {session.patient?.profilePic ? (
-                              <img src={session.patient.profilePic} alt={session.patient.name} className="w-full h-full object-cover" />
-                            ) : (
-                              '👤'
-                            )}
+                            {session.patient?.profilePic
+                              ? <img src={session.patient.profilePic} alt={session.patient.name} className="w-full h-full object-cover" />
+                              : '👤'}
                           </div>
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-semibold text-text-primary truncate">{session.patient?.name}</p>
@@ -294,10 +363,11 @@ const AdminDashboard = () => {
                             </p>
                           </div>
                           {session.displayStatus !== 'ongoing' && (
-                            <span className={`text-xs px-2.5 py-1 rounded-full font-medium capitalize ${session.displayStatus === 'expired' ? 'bg-gray-100 text-text-secondary' :
+                            <span className={`text-xs px-2.5 py-1 rounded-full font-medium capitalize ${
+                              session.displayStatus === 'expired' ? 'bg-gray-100 text-text-secondary' :
                               session.displayStatus === 'ended' ? 'bg-success/10 text-success' :
-                                getStatusBadge(session.status)
-                              }`}>
+                              getStatusBadge(session.status)
+                            }`}>
                               {session.displayStatus}
                             </span>
                           )}
@@ -318,7 +388,7 @@ const AdminDashboard = () => {
                 )}
               </motion.div>
 
-              {/* Recent Patients - ✅ Now clickable, navigates to patient detail */}
+              {/* Recent Patients */}
               <motion.div variants={fadeInUp} className="lg:col-span-2 card">
                 <div className="flex items-center justify-between mb-5">
                   <h2 className="font-display font-bold text-lg text-text-primary">Recent Patients</h2>
@@ -335,9 +405,9 @@ const AdminDashboard = () => {
                     >
                       <div className="flex items-center gap-3 mb-2">
                         <div className="w-10 h-10 rounded-xl bg-primary-light flex items-center justify-center text-xl overflow-hidden">
-                          {patient.profilePic ? (
-                            <img src={patient.profilePic} alt={patient.name} className="w-full h-full object-cover" />
-                          ) : '👤'}
+                          {patient.profilePic
+                            ? <img src={patient.profilePic} alt={patient.name} className="w-full h-full object-cover" />
+                            : '👤'}
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-semibold text-text-primary truncate group-hover:text-primary transition-colors">
