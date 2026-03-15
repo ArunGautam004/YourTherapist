@@ -10,45 +10,24 @@ const initSocket = (io) => {
     console.log(`🔌 Socket connected: ${socket.id}`);
 
     // ── USER ONLINE ──────────────────────────────────────────────────────
-    // Each user joins a private room 'user:<userId>' so we can push
-    // targeted notifications to them regardless of which page they're on.
     socket.on('user:online', (userId) => {
       onlineUsers.set(userId, socket.id);
-      socket.join(`user:${userId}`); // ✅ private notification room
+      socket.join(`user:${userId}`);
       io.emit('user:status', { userId, online: true });
       console.log(`👤 User online: ${userId}`);
     });
 
     // ── DM MESSAGING ────────────────────────────────────────────────────
+    // ✅ FIX: Do NOT save message here — frontend already calls POST /api/messages.
+    // Socket is only for real-time delivery, not DB persistence.
+    // This prevents double-save (API + socket both creating a Message doc).
+    // message:send socket event — real-time delivery is now handled server-side
+    // in the sendMessage controller via io.to('user:receiverId').emit('message:receive')
+    // This handler is kept only for legacy compatibility but does NOT re-deliver
+    // to avoid the double-message bug.
     socket.on('message:send', async (data) => {
-      try {
-        const { senderId, receiverId, text, senderName } = data;
-
-        const message = await Message.create({ sender: senderId, receiver: receiverId, text });
-
-        // Deliver to receiver if online
-        const receiverSocket = onlineUsers.get(receiverId);
-        if (receiverSocket) {
-          io.to(receiverSocket).emit('message:receive', message);
-        }
-        socket.emit('message:sent', message);
-
-        // ✅ New-message notification to receiver
-        const displayName = senderName || 'Someone';
-        const notif = await createNotification({
-          userId: receiverId,
-          type: 'new_message',
-          title: `💬 New message from ${displayName}`,
-          message: text.length > 70 ? text.slice(0, 70) + '…' : text,
-          link: '/patient/messages',
-          meta: { senderId, senderName: displayName },
-        });
-        if (notif) {
-          io.to(`user:${receiverId}`).emit('notification:new', notif);
-        }
-      } catch (error) {
-        socket.emit('error', { message: 'Failed to send message' });
-      }
+      // No-op: delivery already done by API controller
+      // Kept to avoid client-side errors for clients that still emit this event
     });
 
     socket.on('message:read', async ({ senderId, receiverId }) => {
@@ -61,7 +40,37 @@ const initSocket = (io) => {
     });
 
     // ── VIDEO CALL SIGNALING ─────────────────────────────────────────────
-    socket.on('call:join-room', ({ roomId, role, userId, name }) => {
+    socket.on('call:join-room', async ({ roomId, role, userId, name }) => {
+      // ✅ Check session time window — only allow joining 10 min before to session end
+      try {
+        const apt = await Appointment.findOne({ meetingLink: `/session/${roomId}`, paymentStatus: 'paid' });
+        if (apt) {
+          const aptDate = new Date(apt.date);
+          const [tPart, tPeriod] = (apt.time || '').split(' ');
+          let [tH, tM] = (tPart || '0:0').split(':').map(Number);
+          if (tPeriod === 'PM' && tH !== 12) tH += 12;
+          if (tPeriod === 'AM' && tH === 12) tH = 0;
+          aptDate.setHours(tH, tM || 0, 0, 0);
+
+          const endTime = new Date(aptDate.getTime() + (apt.duration || 50) * 60000);
+          const now = new Date();
+          const minsUntil = (aptDate - now) / 60000;
+
+          // Outside window: more than 10 min early OR after session ended
+          if (minsUntil > 10 || now > endTime) {
+            socket.emit('call:access-denied', {
+              reason: minsUntil > 10
+                ? `Session starts in ${Math.ceil(minsUntil)} minutes. Join link becomes active 10 minutes before.`
+                : 'This session has ended.',
+            });
+            return;
+          }
+        }
+      } catch (err) {
+        console.error('Session time check error:', err);
+        // Allow join if check fails — don't block
+      }
+
       socket.join(roomId);
 
       if (!roomsMap.has(roomId)) {
@@ -145,7 +154,6 @@ const initSocket = (io) => {
     // ── SESSION ROOM CHAT ────────────────────────────────────────────────
     socket.on('room:message', ({ roomId, message }) => {
       socket.to(roomId).emit('room:message', message);
-      console.log(`💬 Room message in ${roomId}: ${message.text}`);
     });
 
     // ── LIVE QUESTIONNAIRE ───────────────────────────────────────────────

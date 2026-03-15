@@ -88,6 +88,27 @@ export const sendMessage = async (req, res, next) => {
       text,
     });
 
+    // ✅ Server-side real-time delivery to receiver only
+    // This replaces the frontend socket.emit('message:send') pattern
+    // which caused double messages when the sender's own listener fired.
+    const io = req.app.get('io');
+    if (io) {
+      const senderName = req.user.name?.startsWith('Dr.')
+        ? req.user.name
+        : req.user.role === 'doctor' || req.user.role === 'admin'
+          ? `Dr. ${req.user.name}`
+          : req.user.name;
+
+      io.to(`user:${receiverId}`).emit('message:receive', {
+        _id: message._id.toString(),
+        sender: req.user._id.toString(),
+        receiver: receiverId,
+        text,
+        senderName,
+        createdAt: message.createdAt,
+      });
+    }
+
     res.status(201).json({ message });
   } catch (error) {
     next(error);

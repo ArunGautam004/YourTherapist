@@ -7,16 +7,6 @@ import {
 import Sidebar from '../../components/layout/Sidebar';
 import { patientAPI, messageAPI } from '../../services/api';
 
-const adminLinks = [
-  { name: 'Dashboard', path: '/admin/dashboard', icon: LayoutDashboard },
-  { name: 'Patients', path: '/admin/patients', icon: Users },
-  { name: 'Calendar', path: '/admin/calendar', icon: Calendar },
-  { name: 'Analytics', path: '/admin/analytics', icon: BarChart3 },
-  { name: 'Questionnaires', path: '/admin/questionnaires', icon: ClipboardList },
-  { name: 'Messages', path: '/admin/messages', icon: MessageCircle, badge: '5' },
-  { name: 'Settings', path: '/admin/settings', icon: Settings },
-];
-
 const AdminAnalytics = () => {
   const [analytics, setAnalytics] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -88,8 +78,6 @@ const AdminAnalytics = () => {
     },
   ];
 
-  const maxSessions = analytics?.monthlyData ? Math.max(...analytics.monthlyData.map(m => m.sessions), 1) : 1;
-
   return (
     <div className="min-h-screen bg-background">
       <Sidebar links={dynamicLinks} userRole="admin" />
@@ -121,50 +109,92 @@ const AdminAnalytics = () => {
             ))}
           </div>
 
-          <div className="grid lg:grid-cols-5 gap-6">
-            {/* Session Trend Chart */}
-            <div className="lg:col-span-3 card">
-              <h2 className="font-display font-bold text-lg text-text-primary mb-6">Session Overview</h2>
-              <div className="overflow-x-auto hide-scrollbar">
-                <div className="flex items-end justify-between gap-2 min-w-[300px]" style={{ height: 200 }}>
-                  {(analytics?.monthlyData || []).map((month, i) => (
-                    <div key={i} className="flex-1 flex flex-col items-center gap-2">
-                      <span className="text-xs text-text-secondary font-medium">{month.sessions}</span>
-                      <div className="w-full max-w-[60px] rounded-t-xl bg-gradient-to-t from-primary to-primary/60 transition-all duration-500"
-                        style={{ height: `${(month.sessions / maxSessions) * 160}px`, minHeight: '4px' }}
-                      />
-                      <span className="text-xs text-text-secondary">{month.month}</span>
-                    </div>
-                  ))}
-                </div>
+          <div className="grid lg:grid-cols-2 gap-6">
+            {/* Daily Sessions Chart */}
+            <div className="card">
+              <div className="flex items-center justify-between mb-5">
+                <h2 className="font-display font-bold text-base text-text-primary">Daily Sessions</h2>
+                <span className="text-xs text-text-secondary">Last 7 days</span>
               </div>
-            </div>
-
-            {/* Daily Orders & Revenue Chart */}
-            <div className="lg:col-span-2 card">
-              <h2 className="font-display font-bold text-lg text-text-primary mb-5">Daily Revenue</h2>
               {(analytics?.dailyData || []).length > 0 ? (
-                <div className="overflow-x-auto hide-scrollbar">
-                  <div className="flex items-end justify-between h-48 gap-2 mt-4 pb-6 min-w-[300px]">
-                    {analytics.dailyData.map((day, i) => {
-                      const maxDailyRev = Math.max(...analytics.dailyData.map(d => d.revenue), 1);
-                      const height = (day.revenue / maxDailyRev) * 120;
-                      return (
-                        <div key={i} className="flex-1 flex flex-col items-center gap-2 group relative">
-                          <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none">
-                            ₹{day.revenue.toLocaleString()} • {day.orders} orders
+                <div className="flex items-end justify-between gap-2">
+                  {analytics.dailyData.map((day, i) => {
+                    const maxS = Math.max(...analytics.dailyData.map(d => d.orders), 1);
+                    const barH = day.orders > 0 ? Math.max(Math.round((day.orders / maxS) * 80), 8) : 4;
+                    const isToday = i === analytics.dailyData.length - 1;
+                    return (
+                      <div key={i} className="flex-1 flex flex-col items-center gap-1.5 group">
+                        {/* Bar area — fixed 80px height, bar grows from bottom */}
+                        <div className="relative w-full flex items-end justify-center" style={{ height: 80 }}>
+                          {/* Tooltip above bar */}
+                          <div className="absolute -top-7 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-[10px] px-2 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none">
+                            {day.orders}
                           </div>
-                          <div className="w-full max-w-[32px] bg-gradient-to-t from-secondary to-purple-400 rounded-t-lg transition-all duration-500 hover:brightness-110 cursor-help"
-                            style={{ height: `${height}px`, minHeight: '4px' }}
+                          <div
+                            className={`w-full rounded-t-lg transition-all duration-500 cursor-help ${
+                              isToday ? 'bg-gradient-to-t from-primary to-primary/60'
+                              : day.orders > 0 ? 'bg-gradient-to-t from-primary/60 to-primary/30'
+                              : 'bg-gray-100'
+                            }`}
+                            style={{ height: `${barH}px` }}
                           />
-                          <span className="text-[10px] text-text-secondary font-medium mt-1 whitespace-nowrap">{day.date.split(',')[0]}</span>
                         </div>
-                      );
-                    })}
-                  </div>
+                        {/* Label always visible below */}
+                        <span className={`text-[9px] font-medium text-center leading-none ${isToday ? 'text-primary font-bold' : 'text-text-secondary'}`}>
+                          {day.date.split(',')[0]}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
               ) : (
-                <p className="text-sm text-text-secondary text-center py-12">No daily data available</p>
+                <div className="flex items-center justify-center h-24">
+                  <p className="text-sm text-text-secondary">No data yet</p>
+                </div>
+              )}
+            </div>
+
+            {/* Daily Revenue Chart */}
+            <div className="card">
+              <div className="flex items-center justify-between mb-5">
+                <h2 className="font-display font-bold text-base text-text-primary">Daily Revenue</h2>
+                <span className="text-xs text-text-secondary">Last 7 days</span>
+              </div>
+              {(analytics?.dailyData || []).length > 0 ? (
+                <div className="flex items-end justify-between gap-2">
+                  {analytics.dailyData.map((day, i) => {
+                    const maxR = Math.max(...analytics.dailyData.map(d => d.revenue), 1);
+                    const barH = day.revenue > 0 ? Math.max(Math.round((day.revenue / maxR) * 80), 8) : 4;
+                    const isToday = i === analytics.dailyData.length - 1;
+                    return (
+                      <div key={i} className="flex-1 flex flex-col items-center gap-1.5 group">
+                        {/* Bar area — fixed 80px height */}
+                        <div className="relative w-full flex items-end justify-center" style={{ height: 80 }}>
+                          {/* Tooltip above bar */}
+                          <div className="absolute -top-7 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-[10px] px-2 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none">
+                            ₹{day.revenue.toLocaleString()}
+                          </div>
+                          <div
+                            className={`w-full rounded-t-lg transition-all duration-500 cursor-help ${
+                              isToday ? 'bg-gradient-to-t from-secondary to-purple-400'
+                              : day.revenue > 0 ? 'bg-gradient-to-t from-secondary/60 to-purple-300'
+                              : 'bg-gray-100'
+                            }`}
+                            style={{ height: `${barH}px` }}
+                          />
+                        </div>
+                        {/* Label always visible below */}
+                        <span className={`text-[9px] font-medium text-center leading-none ${isToday ? 'text-secondary font-bold' : 'text-text-secondary'}`}>
+                          {day.date.split(',')[0]}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="flex items-center justify-center h-24">
+                  <p className="text-sm text-text-secondary">No data yet</p>
+                </div>
               )}
             </div>
           </div>

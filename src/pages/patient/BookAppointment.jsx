@@ -43,21 +43,26 @@ const BookAppointment = () => {
   const [booking, setBooking] = useState(false);
   const [loadingDoctors, setLoadingDoctors] = useState(true);
   const [bookingSuccess, setBookingSuccess] = useState(false);
+  const [dayAvailability, setDayAvailability] = useState({}); // date string -> bool
   const [bookedAppointment, setBookedAppointment] = useState(null);
 
-  // Generate next 14 days starting from today (exclude Sundays)
+  // Generate next 14 days starting from today
+  // Don't exclude any day — doctor availability handles which days are bookable
   const now = new Date();
   const dates = Array.from({ length: 14 }, (_, i) => {
     const d = new Date();
-    d.setDate(d.getDate() + i); // Start from today
+    d.setDate(d.getDate() + i);
     return d;
-  }).filter(d => d.getDay() !== 0);
+  });
 
   // Helper: check if a time slot has already passed for today
   const isSlotPassed = (slotTime) => {
+    if (!slotTime) return false;
     if (!selectedDate || selectedDate.toDateString() !== now.toDateString()) return false;
-    const [time, period] = slotTime.split(' ');
-    let [h, m] = time.split(':').map(Number);
+    const timeStr = typeof slotTime === 'string' ? slotTime : slotTime.time;
+    if (!timeStr) return false;
+    const [time, period] = timeStr.split(' ');
+    let [h, m] = (time || '0:0').split(':').map(Number);
     if (period === 'PM' && h !== 12) h += 12;
     if (period === 'AM' && h === 12) h = 0;
     return h * 60 + (m || 0) <= now.getHours() * 60 + now.getMinutes();
@@ -92,8 +97,11 @@ const BookAppointment = () => {
       try {
         const dateStr = selectedDate.toISOString().split('T')[0];
         const { data } = await appointmentAPI.getSlots(selectedDoctor._id, dateStr);
-        setAvailableSlots(data.slots || []);
+        const slots = data.slots || [];
+        setAvailableSlots(slots);
         if (data.doctor) setDoctorInfo(data.doctor);
+        // Track availability per date for UI indicators
+        setDayAvailability(prev => ({ ...prev, [dateStr]: slots.length > 0 }));
       } catch (err) {
         console.error(err);
         setAvailableSlots([]);
@@ -274,21 +282,45 @@ const BookAppointment = () => {
             <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="card">
               <h2 className="font-display font-bold text-lg text-text-primary mb-5">Select Date</h2>
               <div className="flex gap-2 overflow-x-auto pb-2 mb-6">
-                {dates.map((date) => (
-                  <button
-                    key={date.toISOString()}
-                    onClick={() => { setSelectedDate(date); setSelectedTime(null); }}
-                    className={`flex-shrink-0 flex flex-col items-center p-3 rounded-2xl min-w-[70px] transition-all
-                      ${selectedDate?.toDateString() === date.toDateString()
-                        ? 'bg-primary text-white shadow-glow'
-                        : 'bg-gray-50 text-text-secondary hover:bg-gray-100'
+                {dates.map((date) => {
+                  const isSelected = selectedDate?.toDateString() === date.toDateString();
+                  const isTodayDate = date.toDateString() === now.toDateString();
+                  const dateKey = date.toISOString().split('T')[0];
+                  const hasSlots = dayAvailability[dateKey] === true;
+                  const notAvail = dayAvailability.hasOwnProperty(dateKey) && !dayAvailability[dateKey];
+                  return (
+                    <button
+                      key={date.toISOString()}
+                      onClick={() => { setSelectedDate(date); setSelectedTime(null); }}
+                      className={`flex-shrink-0 flex flex-col items-center p-3 rounded-2xl min-w-[72px] transition-all border-2 ${
+                        isSelected
+                          ? 'bg-primary text-white shadow-glow border-primary'
+                          : notAvail
+                            ? 'bg-gray-50 text-gray-400 border-gray-100'
+                            : 'bg-white text-text-secondary hover:bg-primary-light hover:border-primary/20 border-gray-100'
                       }`}
-                  >
-                    <span className="text-xs font-medium">{date.toLocaleDateString('en', { weekday: 'short' })}</span>
-                    <span className="text-lg font-bold">{date.getDate()}</span>
-                    <span className="text-xs">{date.toLocaleDateString('en', { month: 'short' })}</span>
-                  </button>
-                ))}
+                    >
+                      <span className={`text-[10px] font-semibold ${isSelected ? 'text-white/80' : 'text-text-secondary'}`}>
+                        {date.toLocaleDateString('en', { weekday: 'short' })}
+                      </span>
+                      <span className={`text-lg font-bold ${isTodayDate && !isSelected ? 'text-primary' : ''}`}>
+                        {date.getDate()}
+                      </span>
+                      <span className={`text-[10px] ${isSelected ? 'text-white/70' : 'text-text-secondary'}`}>
+                        {date.toLocaleDateString('en', { month: 'short' })}
+                      </span>
+                      {isTodayDate && !isSelected && (
+                        <span className="text-[8px] text-primary font-bold mt-0.5">Today</span>
+                      )}
+                      {notAvail && !isSelected && (
+                        <span className="text-[8px] text-gray-400 mt-0.5">Unavailable</span>
+                      )}
+                      {hasSlots && !isSelected && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-success mt-0.5 inline-block" />
+                      )}
+                    </button>
+                  );
+                })}
               </div>
 
               {selectedDate && (
@@ -300,27 +332,35 @@ const BookAppointment = () => {
                     </div>
                   ) : availableSlots.length > 0 ? (
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                      {availableSlots.filter((slot) => !isSlotPassed(slot.time)).map((slot) => (
-                        <button
-                          key={slot.time}
-                          disabled={!slot.available}
-                          onClick={() => setSelectedTime(slot.time)}
-                          className={`p-3 rounded-2xl text-sm font-medium transition-all flex items-center justify-center gap-1
-                            ${selectedTime === slot.time
-                              ? 'bg-primary text-white shadow-glow'
-                              : slot.available
-                                ? 'bg-gray-50 text-text-primary hover:bg-primary-light'
-                                : 'bg-gray-100 text-gray-300 cursor-not-allowed line-through'
-                            }`}
-                        >
-                          <Clock className="w-4 h-4" /> {slot.time}
-                        </button>
-                      ))}
+                      {availableSlots
+                        .filter((slot) => !isSlotPassed(typeof slot === 'string' ? slot : slot.time))
+                        .map((slot) => {
+                          // Backend returns plain strings e.g. "10:00 AM"
+                          const timeStr = typeof slot === 'string' ? slot : slot.time;
+                          return (
+                            <button
+                              key={timeStr}
+                              onClick={() => setSelectedTime(timeStr)}
+                              className={`p-3 rounded-2xl text-sm font-medium transition-all flex items-center justify-center gap-1
+                                ${selectedTime === timeStr
+                                  ? 'bg-primary text-white shadow-glow'
+                                  : 'bg-gray-50 text-text-primary hover:bg-primary-light hover:text-primary'
+                                }`}
+                            >
+                              <Clock className="w-4 h-4" /> {timeStr}
+                            </button>
+                          );
+                        })}
                     </div>
                   ) : (
-                    <p className="text-center py-6 text-text-secondary text-sm">
-                      No available slots on this day. The doctor hasn't set availability for {selectedDate.toLocaleDateString('en', { weekday: 'long' })}s.
-                    </p>
+                    <div className="text-center py-8">
+                      <Clock className="w-10 h-10 text-gray-300 mx-auto mb-3" />
+                      <p className="text-sm font-semibold text-text-primary">Not Available</p>
+                      <p className="text-xs text-text-secondary mt-1">
+                        No slots on {selectedDate.toLocaleDateString('en', { weekday: 'long', month: 'long', day: 'numeric' })}.
+                        Try another date.
+                      </p>
+                    </div>
                   )}
                 </>
               )}

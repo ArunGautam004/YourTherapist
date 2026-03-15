@@ -45,7 +45,12 @@ const defaultSlots = DAYS.map(day => ({
 
 function getWeekStart(date) {
   const d = new Date(date);
-  d.setDate(d.getDate() - d.getDay() + 1);
+  // JS: Sunday=0, Monday=1 ... Saturday=6
+  // We want Monday as week start
+  // If today is Sunday (0), go back 6 days to get Monday
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day; // Sunday → -6, others → 1 - day
+  d.setDate(d.getDate() + diff);
   d.setHours(0, 0, 0, 0);
   return d;
 }
@@ -309,7 +314,10 @@ const AdminCalendar = () => {
                         <div className={`text-lg ${isToday(day) ? 'bg-primary text-white w-8 h-8 rounded-xl flex items-center justify-center mx-auto' : ''}`}>
                           {day.getDate()}
                         </div>
-                        {!isDayAvailable(day) && <span className="text-[10px] text-red-400 block">Off</span>}
+                        {!isDayAvailable(day)
+                          ? <span className="text-[9px] text-gray-400 block mt-0.5 font-medium">Not Available</span>
+                          : <span className="text-[9px] text-success block mt-0.5 font-medium">Available</span>
+                        }
                       </th>
                     ))}
                   </tr>
@@ -361,10 +369,12 @@ const AdminCalendar = () => {
                               </div>
                             ) : isAvailable ? (
                               <div className="h-12 rounded-xl border border-dashed border-green-200 bg-green-50/30 hover:border-primary/30 transition-colors flex items-center justify-center">
-                                <span className="text-[10px] text-green-400">Available</span>
+                                <span className="text-[10px] text-green-500 font-medium">Open</span>
                               </div>
                             ) : (
-                              <div className="h-12 rounded-xl bg-gray-50" />
+                              <div className="h-12 rounded-xl bg-gray-50/50 flex items-center justify-center">
+                                <span className="text-[9px] text-gray-300 font-medium">–</span>
+                              </div>
                             )}
                           </td>
                         );

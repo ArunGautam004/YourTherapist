@@ -204,7 +204,7 @@ export const verifyPayment = async (req, res, next) => {
         type: 'appointment_confirmed',
         title: '✅ Appointment Confirmed',
         message: `Your appointment with Dr. ${appointment.doctor.name} on ${dateStr} at ${appointment.time} is confirmed.`,
-        link: appointment.meetingLink,
+        link: '/patient/sessions',   // ✅ opens My Sessions, NOT the meeting link
         meta: { appointmentId: appointment._id },
       });
       const doctorNotif = await createNotification({
@@ -423,8 +423,10 @@ export const getAvailableSlots = async (req, res, next) => {
     const doctor = await User.findById(doctorId);
     if (!doctor) return res.status(404).json({ message: 'Doctor not found' });
 
-    const requestedDate = new Date(date);
-    // Use 'en-US' to get English day names matching the stored enum
+    // ✅ Parse date parts directly to avoid UTC timezone offset issues
+    // "2026-03-15" → [2026, 3, 15] → local midnight, not UTC midnight
+    const [year, month, day] = date.split('-').map(Number);
+    const requestedDate = new Date(year, month - 1, day);
     const dayOfWeek = requestedDate.toLocaleDateString('en-US', { weekday: 'long' });
 
     // ✅ FIX: read from availableSlots (correct field name in User model)
