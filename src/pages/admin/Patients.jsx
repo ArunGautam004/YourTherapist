@@ -4,7 +4,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   LayoutDashboard, Users, Calendar, BarChart3, MessageCircle, Settings,
   Search, AlertTriangle, TrendingUp, TrendingDown, Minus,
-  Video, FileText, ClipboardList, ChevronDown, ChevronUp, Save, Loader2, X, Edit2, Check
+  Video, FileText, ClipboardList, ChevronDown, ChevronUp, Save, Loader2, X, Edit2, Check, PlusCircle, Mail, Send
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Sidebar from '../../components/layout/Sidebar';
@@ -25,13 +25,40 @@ const AdminPatients = () => {
   const [aptDetail, setAptDetail] = useState({});
   const [aptDetailLoading, setAptDetailLoading] = useState(null);
   const [reportText, setReportText] = useState('');
+  const [editingReportId, setEditingReportId] = useState(null); // which apt is in edit mode
   const [savingReport, setSavingReport] = useState(false);
+
+  // Clinical notes
+  const [addingNote, setAddingNote] = useState(false);
+  const [newNoteText, setNewNoteText] = useState('');
+  const [newNoteRisk, setNewNoteRisk] = useState('low');
+  const [savingNote, setSavingNote] = useState(false);
 
   const [isEditingRisk, setIsEditingRisk] = useState(false);
   const [editRisk, setEditRisk] = useState('');
   const [isEditingDiagnosis, setIsEditingDiagnosis] = useState(false);
   const [editDiagnosis, setEditDiagnosis] = useState('');
   const [savingPatient, setSavingPatient] = useState(false);
+
+  // Email modal state
+  const [showEmailModal, setShowEmailModal] = useState(false);
+  const [emailDescription, setEmailDescription] = useState('');
+  const [sendingEmail, setSendingEmail] = useState(false);
+
+  const handleSendEmail = async () => {
+    if (!emailDescription.trim()) return toast.error('Please write a description');
+    setSendingEmail(true);
+    try {
+      await messageAPI.sendEmailToPatient({ patientId: selectedPatient._id, description: emailDescription });
+      toast.success(`Email sent to ${selectedPatient.name}!`);
+      setShowEmailModal(false);
+      setEmailDescription('');
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to send email');
+    } finally {
+      setSendingEmail(false);
+    }
+  };
 
   const dynamicLinks = [
     { name: 'Dashboard', path: '/admin/dashboard', icon: LayoutDashboard },
@@ -61,15 +88,12 @@ const AdminPatients = () => {
     }
   };
 
-  // ✅ On mount: fetch patients, then auto-select if ?selected= param exists
   useEffect(() => {
     const autoSelectId = searchParams.get('selected');
     fetchPatients().then((fetchedPatients) => {
       if (autoSelectId && fetchedPatients.length > 0) {
         const match = fetchedPatients.find(p => p._id === autoSelectId);
-        if (match) {
-          handleSelectPatient(match);
-        }
+        if (match) handleSelectPatient(match);
       }
     });
   }, []);
@@ -82,11 +106,19 @@ const AdminPatients = () => {
     setSelectedPatient(patient);
     setExpandedApt(null);
     setAptDetail({});
-    // Update URL so it's shareable / back-navigable
     setSearchParams({ selected: patient._id });
     try {
       const { data } = await patientAPI.getById(patient._id);
       setPatientDetail(data);
+      // ✅ Sync selectedPatient with fresh User model data
+      // (riskLevel & diagnosis from User model, not derived from SessionNote)
+      if (data.patient) {
+        setSelectedPatient(prev => ({
+          ...prev,
+          riskLevel: data.patient.riskLevel || prev.riskLevel || 'low',
+          diagnosis: data.patient.diagnosis || prev.diagnosis || '',
+        }));
+      }
     } catch (err) {
       console.error(err);
     }
@@ -99,10 +131,7 @@ const AdminPatients = () => {
   };
 
   const handleExpandApt = async (aptId) => {
-    if (expandedApt === aptId) {
-      setExpandedApt(null);
-      return;
-    }
+    if (expandedApt === aptId) { setExpandedApt(null); return; }
     setExpandedApt(aptId);
     if (aptDetail[aptId]) return;
     setAptDetailLoading(aptId);
@@ -117,10 +146,7 @@ const AdminPatients = () => {
   };
 
   const handleSaveReport = async (aptId, patientId) => {
-    if (!reportText.trim()) {
-      toast.error('Please enter a report');
-      return;
-    }
+    if (!reportText.trim()) { toast.error('Please enter a report'); return; }
     setSavingReport(true);
     try {
       const existing = aptDetail[aptId]?.sessionNote;
@@ -138,6 +164,7 @@ const AdminPatients = () => {
       const { data } = await sessionAPI.getSessionDetail(aptId);
       setAptDetail(prev => ({ ...prev, [aptId]: data }));
       setReportText('');
+      setEditingReportId(null);
     } catch (err) {
       toast.error('Failed to save report');
     } finally {
@@ -161,6 +188,30 @@ const AdminPatients = () => {
     }
   };
 
+  const handleSaveClinicalNote = async () => {
+    if (!newNoteText.trim()) { toast.error('Please write a note'); return; }
+    setSavingNote(true);
+    try {
+      await sessionAPI.createNote({
+        patient: selectedPatient._id,
+        sessionDescription: newNoteText.trim(),
+        riskLevel: newNoteRisk,
+        progressStatus: 'progress',
+        isSharedWithPatient: false,
+      });
+      toast.success('Clinical note saved!');
+      const { data } = await patientAPI.getById(selectedPatient._id);
+      setPatientDetail(data);
+      setNewNoteText('');
+      setAddingNote(false);
+    } catch (err) {
+      toast.error('Failed to save note');
+    } finally {
+      setSavingNote(false);
+    }
+  };
+
+  // Only show paid appointments in patient history
   const getAptDisplayStatus = (apt) => {
     if (apt.status === 'cancelled') return { label: 'Cancelled', style: 'bg-gray-100 text-gray-500' };
     if (apt.status === 'completed') return { label: 'Ended', style: 'bg-success/10 text-success' };
@@ -182,7 +233,7 @@ const AdminPatients = () => {
   };
 
   const getRiskBadge = (level) => {
-    const styles = { low: 'bg-success/10 text-success', medium: 'bg-warning/10 text-warning', high: 'bg-danger/10 text-danger' };
+    const styles = { low: 'bg-success/10 text-success', medium: 'bg-warning/10 text-warning', high: 'bg-danger/10 text-danger', critical: 'bg-red-100 text-red-700' };
     return styles[level] || styles.low;
   };
 
@@ -191,6 +242,9 @@ const AdminPatients = () => {
     if (trend === 'down') return <TrendingDown className="w-4 h-4 text-danger" />;
     return <Minus className="w-4 h-4 text-warning" />;
   };
+
+  // Only paid appointments shown
+  const paidAppointments = (patientDetail?.appointments || []).filter(a => a.paymentStatus === 'paid');
 
   return (
     <div className="min-h-screen bg-background">
@@ -207,31 +261,33 @@ const AdminPatients = () => {
             </div>
           </div>
 
-          {/* Search & Filter */}
-          <div className="card mb-6 flex flex-col sm:flex-row items-center gap-3">
-            <div className="relative flex-1 w-full">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-secondary/50" />
-              <input
-                type="text"
-                placeholder="Search patients by name..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="input-field !pl-12"
-              />
+          {/* ✅ Search & Filter ONLY shown when NOT viewing a patient profile */}
+          {!selectedPatient && (
+            <div className="card mb-6 flex flex-col sm:flex-row items-center gap-3">
+              <div className="relative flex-1 w-full">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-secondary/50" />
+                <input
+                  type="text"
+                  placeholder="Search patients by name..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="input-field !pl-12"
+                />
+              </div>
+              <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
+                {['all', 'high', 'medium', 'low'].map((level) => (
+                  <button
+                    key={level}
+                    onClick={() => setFilterRisk(level)}
+                    className={`px-4 py-2.5 rounded-xl text-sm font-medium capitalize transition-all
+                      ${filterRisk === level ? 'bg-primary text-white shadow-glow' : 'bg-gray-50 text-text-secondary hover:bg-gray-100'}`}
+                  >
+                    {level === 'all' ? 'All' : level}
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="flex items-center gap-2 w-full sm:w-auto">
-              {['all', 'high', 'medium', 'low'].map((level) => (
-                <button
-                  key={level}
-                  onClick={() => setFilterRisk(level)}
-                  className={`px-4 py-2.5 rounded-xl text-sm font-medium capitalize transition-all
-                    ${filterRisk === level ? 'bg-primary text-white shadow-glow' : 'bg-gray-50 text-text-secondary hover:bg-gray-100'}`}
-                >
-                  {level === 'all' ? 'All' : level}
-                </button>
-              ))}
-            </div>
-          </div>
+          )}
 
           {selectedPatient ? (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
@@ -242,26 +298,20 @@ const AdminPatients = () => {
                 ← Back to all patients
               </button>
               <div className="grid lg:grid-cols-3 gap-6">
-                {/* Patient Info */}
-                <div className="card">
+                {/* ── Patient Info Card (fixed size) ── */}
+                <div className="card lg:self-start lg:sticky lg:top-6">
                   <div className="text-center mb-6">
                     <div className="w-20 h-20 rounded-3xl bg-primary-light flex items-center justify-center text-4xl mx-auto mb-4 overflow-hidden">
                       {selectedPatient.profilePic ? (
                         <img src={selectedPatient.profilePic} alt={selectedPatient.name} className="w-full h-full object-cover" />
-                      ) : (
-                        <span>👤</span>
-                      )}
+                      ) : <span>👤</span>}
                     </div>
                     <h3 className="font-display font-bold text-xl text-text-primary">{selectedPatient.name}</h3>
                     <p className="text-sm text-text-secondary">{selectedPatient.gender || ''}</p>
                     <div className="flex items-center justify-center gap-2 mt-2">
                       {isEditingRisk ? (
                         <div className="flex items-center gap-1">
-                          <select
-                            value={editRisk}
-                            onChange={(e) => setEditRisk(e.target.value)}
-                            className="text-xs p-1 border rounded"
-                          >
+                          <select value={editRisk} onChange={(e) => setEditRisk(e.target.value)} className="text-xs p-1 border rounded">
                             <option value="low">Low Risk</option>
                             <option value="medium">Medium Risk</option>
                             <option value="high">High Risk</option>
@@ -281,54 +331,63 @@ const AdminPatients = () => {
                         </div>
                       )}
                     </div>
-                    <div className="flex flex-col gap-2 mt-4 px-4">
-                      <button 
-                        onClick={() => navigate('/admin/messages', { state: { targetPartner: selectedPatient } })}
-                        className="btn-primary flex items-center justify-center gap-2 !py-2.5 text-sm w-full"
-                      >
-                        <MessageCircle className="w-4 h-4" /> Message Patient
-                      </button>
-                    </div>
                   </div>
-                  <div className="space-y-3">
-                    <div className="p-3 rounded-xl bg-gray-50 group/diag relative">
-                      <div className="flex justify-between items-start">
-                        <p className="text-xs text-text-secondary">Diagnosis</p>
-                        {!isEditingDiagnosis && (
-                          <button onClick={() => { setEditDiagnosis(selectedPatient.diagnosis || ''); setIsEditingDiagnosis(true); }} className="p-1 hover:bg-gray-200 rounded text-text-secondary opacity-0 group-hover/diag:opacity-100 transition-opacity">
-                            <Edit2 className="w-3 h-3" />
-                          </button>
+
+                  <div className="flex flex-col gap-2">
+                    <button
+                      onClick={() => navigate('/admin/messages', { state: { targetPartner: selectedPatient } })}
+                      className="btn-primary flex items-center justify-center gap-2 !py-2.5 text-sm w-full"
+                    >
+                      <MessageCircle className="w-4 h-4" /> Send Message
+                    </button>
+                    <button
+                      onClick={() => setShowEmailModal(true)}
+                      className="btn-outline flex items-center justify-center gap-2 !py-2.5 text-sm w-full"
+                    >
+                      <Mail className="w-4 h-4" /> Send Email
+                    </button>
+
+                    <div className="space-y-2 mt-2">
+                      <div className="p-3 rounded-xl bg-gray-50 group/diag">
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs text-text-secondary">Diagnosis</p>
+                          {!isEditingDiagnosis && (
+                            <button onClick={() => { setEditDiagnosis(selectedPatient.diagnosis || ''); setIsEditingDiagnosis(true); }} className="p-1 hover:bg-gray-200 rounded text-text-secondary">
+                              <Edit2 className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                        {isEditingDiagnosis ? (
+                          <div className="flex items-center gap-1 mt-1">
+                            <input type="text" value={editDiagnosis} onChange={e => setEditDiagnosis(e.target.value)} className="flex-1 text-sm p-1 border rounded" autoFocus />
+                            <button onClick={() => handleUpdatePatient('diagnosis', editDiagnosis)} disabled={savingPatient} className="text-success"><Check className="w-4 h-4" /></button>
+                            <button onClick={() => setIsEditingDiagnosis(false)} className="text-text-secondary"><X className="w-4 h-4" /></button>
+                          </div>
+                        ) : (
+                          <p className="text-sm font-medium text-text-primary mt-0.5">{selectedPatient.diagnosis || 'Not assessed yet'}</p>
                         )}
                       </div>
-                      {isEditingDiagnosis ? (
-                        <div className="flex items-center gap-1 mt-1">
-                          <input type="text" value={editDiagnosis} onChange={e => setEditDiagnosis(e.target.value)} className="flex-1 text-sm p-1 border rounded" autoFocus />
-                          <button onClick={() => handleUpdatePatient('diagnosis', editDiagnosis)} disabled={savingPatient} className="text-success"><Check className="w-4 h-4" /></button>
-                          <button onClick={() => setIsEditingDiagnosis(false)} className="text-text-secondary"><X className="w-4 h-4" /></button>
-                        </div>
-                      ) : (
-                        <p className="text-sm font-medium text-text-primary mt-0.5">{selectedPatient.diagnosis || 'Not assessed yet'}</p>
-                      )}
-                    </div>
-                    <div className="p-3 rounded-xl bg-gray-50">
-                      <p className="text-xs text-text-secondary">Email</p>
-                      <p className="text-sm font-medium text-text-primary">{selectedPatient.email}</p>
-                    </div>
-                    <div className="p-3 rounded-xl bg-gray-50">
-                      <p className="text-xs text-text-secondary">Phone</p>
-                      <p className="text-sm font-medium text-text-primary">{selectedPatient.phone || '—'}</p>
-                    </div>
-                    <div className="p-3 rounded-xl bg-gray-50">
-                      <p className="text-xs text-text-secondary">Sessions Completed</p>
-                      <p className="text-sm font-medium text-text-primary">{patientDetail?.sessionCount || selectedPatient.sessions || 0}</p>
+                      <div className="p-3 rounded-xl bg-gray-50">
+                        <p className="text-xs text-text-secondary">Email</p>
+                        <p className="text-sm font-medium text-text-primary break-all">{selectedPatient.email}</p>
+                      </div>
+                      <div className="p-3 rounded-xl bg-gray-50">
+                        <p className="text-xs text-text-secondary">Phone</p>
+                        <p className="text-sm font-medium text-text-primary">{selectedPatient.phone || '—'}</p>
+                      </div>
+                      <div className="p-3 rounded-xl bg-gray-50">
+                        <p className="text-xs text-text-secondary">Sessions</p>
+                        <p className="text-sm font-medium text-text-primary">{paidAppointments.length}</p>
+                      </div>
                     </div>
                   </div>
                 </div>
 
-                {/* Session & Note History */}
-                <div className="lg:col-span-2 space-y-6">
+                {/* ── History Column (scrollable) ── */}
+                <div className="lg:col-span-2 space-y-6 overflow-y-auto">
+                  {/* Appointment History — only paid */}
                   <div className="card">
-                    <h3 className="font-display font-bold text-lg text-text-primary mb-5">Appointment History</h3>
+                    <h3 className="font-display font-bold text-lg text-text-primary mb-5">Session History</h3>
                     <div className="overflow-x-auto">
                       <table className="w-full text-left">
                         <thead>
@@ -340,17 +399,18 @@ const AdminPatients = () => {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-50">
-                          {(patientDetail?.appointments || []).map((apt, i) => {
+                          {paidAppointments.map((apt, i) => {
                             const aptId = apt._id || `apt-${i}`;
                             const detail = aptDetail[aptId];
                             const isExpanded = expandedApt === aptId;
                             const isLoading = aptDetailLoading === aptId;
+                            const status = getAptDisplayStatus(apt);
                             return (
                               <>
                                 <tr
                                   key={aptId}
-                                  className="group hover:bg-gray-50/50 transition-colors cursor-pointer"
-                                  onClick={() => handleExpandApt(aptId)}
+                                  className={`group transition-colors ${status.label !== 'Upcoming' ? 'hover:bg-gray-50/50 cursor-pointer' : 'cursor-default'}`}
+                                  onClick={() => status.label !== 'Upcoming' && handleExpandApt(aptId)}
                                 >
                                   <td className="py-3 px-2 whitespace-nowrap">
                                     <span className="text-sm font-medium text-text-primary">
@@ -359,18 +419,17 @@ const AdminPatients = () => {
                                   </td>
                                   <td className="py-3 px-2 text-sm text-text-secondary">{apt.time}</td>
                                   <td className="py-3 px-2 text-right">
-                                    {(() => {
-                                      const status = getAptDisplayStatus(apt);
-                                      return (
-                                        <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full uppercase ${status.style}`}>
-                                          {status.label}
-                                        </span>
-                                      );
-                                    })()}
+                                    <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full uppercase ${status.style}`}>
+                                      {status.label}
+                                    </span>
                                   </td>
                                   <td className="py-3 px-2 text-right">
                                     {isLoading ? (
                                       <Loader2 className="w-4 h-4 animate-spin text-primary ml-auto" />
+                                    ) : status.label === 'Upcoming' ? (
+                                      <span className="text-xs font-semibold text-gray-400 bg-gray-100 px-3 py-1.5 rounded-lg inline-flex items-center justify-center gap-1 ml-auto cursor-not-allowed select-none" title="Details available after the session">
+                                        Details <ChevronDown className="w-3 h-3" />
+                                      </span>
                                     ) : (
                                       <button
                                         onClick={(e) => { e.stopPropagation(); handleExpandApt(aptId); }}
@@ -391,7 +450,7 @@ const AdminPatients = () => {
                                         </div>
                                       ) : detail ? (
                                         <div className="space-y-4">
-                                          {/* Session Description (auto-saved during call) */}
+                                          {/* Session Notes */}
                                           <div>
                                             <h5 className="text-sm font-semibold text-text-primary mb-2 flex items-center gap-1">
                                               <FileText className="w-4 h-4 text-primary" /> Session Notes
@@ -405,16 +464,23 @@ const AdminPatients = () => {
                                             )}
                                           </div>
 
-                                          {/* Report */}
+                                          {/* Report — with edit option */}
                                           <div>
-                                            <h5 className="text-sm font-semibold text-text-primary mb-2 flex items-center gap-1">
-                                              <FileText className="w-4 h-4 text-primary" /> Report
-                                            </h5>
-                                            {detail.sessionNote?.report ? (
-                                              <p className="text-sm text-text-secondary bg-green-50 p-3 rounded-xl border border-green-200">
-                                                {detail.sessionNote.report}
-                                              </p>
-                                            ) : (
+                                            <div className="flex items-center justify-between mb-2">
+                                              <h5 className="text-sm font-semibold text-text-primary flex items-center gap-1">
+                                                <FileText className="w-4 h-4 text-primary" /> Report
+                                              </h5>
+                                              {detail.sessionNote?.report && editingReportId !== aptId && (
+                                                <button
+                                                  onClick={() => { setEditingReportId(aptId); setReportText(detail.sessionNote.report); }}
+                                                  className="text-xs flex items-center gap-1 text-primary hover:underline"
+                                                >
+                                                  <Edit2 className="w-3 h-3" /> Edit
+                                                </button>
+                                              )}
+                                            </div>
+
+                                            {editingReportId === aptId || !detail.sessionNote?.report ? (
                                               <div className="space-y-2">
                                                 <textarea
                                                   value={reportText}
@@ -422,16 +488,32 @@ const AdminPatients = () => {
                                                   placeholder="Write a session report..."
                                                   rows={3}
                                                   className="input-field text-sm resize-none"
+                                                  autoFocus={editingReportId === aptId}
+                                                  defaultValue={detail.sessionNote?.report || ''}
                                                 />
-                                                <button
-                                                  onClick={() => handleSaveReport(aptId, selectedPatient?._id)}
-                                                  disabled={savingReport}
-                                                  className="btn-primary text-sm flex items-center gap-1 !py-2"
-                                                >
-                                                  {savingReport ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
-                                                  Save Report
-                                                </button>
+                                                <div className="flex gap-2">
+                                                  <button
+                                                    onClick={() => handleSaveReport(aptId, selectedPatient?._id)}
+                                                    disabled={savingReport}
+                                                    className="btn-primary text-sm flex items-center gap-1 !py-2"
+                                                  >
+                                                    {savingReport ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                                                    Save Report
+                                                  </button>
+                                                  {editingReportId === aptId && (
+                                                    <button
+                                                      onClick={() => { setEditingReportId(null); setReportText(''); }}
+                                                      className="btn-outline text-sm !py-2"
+                                                    >
+                                                      Cancel
+                                                    </button>
+                                                  )}
+                                                </div>
                                               </div>
+                                            ) : (
+                                              <p className="text-sm text-text-secondary bg-green-50 p-3 rounded-xl border border-green-200">
+                                                {detail.sessionNote.report}
+                                              </p>
                                             )}
                                           </div>
 
@@ -461,13 +543,7 @@ const AdminPatients = () => {
                                                       {(qr.responses || []).map((r, ri) => (
                                                         <div key={ri} className="bg-white p-3 rounded-lg border border-purple-100">
                                                           <p className="text-xs text-text-secondary mb-1">{r.questionText}</p>
-                                                          <p className="text-sm font-medium text-text-primary break-words">
-                                                            {r.type === 'image' && typeof r.answer === 'string' && r.answer.startsWith('http') ? (
-                                                              <a href={r.answer} target="_blank" rel="noreferrer" className="text-primary hover:underline">
-                                                                View Uploaded Image
-                                                              </a>
-                                                            ) : r.answer}
-                                                          </p>
+                                                          <p className="text-sm font-medium text-text-primary break-words">{r.answer}</p>
                                                         </div>
                                                       ))}
                                                     </div>
@@ -490,15 +566,71 @@ const AdminPatients = () => {
                           })}
                         </tbody>
                       </table>
-                      {(!patientDetail?.appointments || patientDetail.appointments.length === 0) && (
-                        <p className="text-center py-8 text-text-secondary text-sm">No appointment history found</p>
+                      {paidAppointments.length === 0 && (
+                        <div className="text-center py-10">
+                        <Video className="w-10 h-10 text-gray-300 mx-auto mb-2" />
+                        <p className="text-sm font-medium text-text-primary">No sessions yet</p>
+                        <p className="text-xs text-text-secondary mt-1">Sessions will appear here once the patient books and pays.</p>
+                      </div>
                       )}
                     </div>
                   </div>
 
-                  {/* Clinical Session Notes */}
+                  {/* Clinical Notes — now operational */}
                   <div className="card">
-                    <h3 className="font-display font-bold text-lg text-text-primary mb-5">Clinical Session Notes</h3>
+                    <div className="flex items-center justify-between mb-5">
+                      <h3 className="font-display font-bold text-lg text-text-primary">Clinical Notes</h3>
+                      <button
+                        onClick={() => setAddingNote(!addingNote)}
+                        className="btn-primary text-sm flex items-center gap-1 !py-2 !px-3"
+                      >
+                        <PlusCircle className="w-4 h-4" />
+                        Add Note
+                      </button>
+                    </div>
+
+                    {/* Add new clinical note form */}
+                    <AnimatePresence>
+                      {addingNote && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }}
+                          className="mb-5 space-y-3 overflow-hidden"
+                        >
+                          <textarea
+                            value={newNoteText}
+                            onChange={e => setNewNoteText(e.target.value)}
+                            placeholder="Write your clinical observation or note..."
+                            rows={4}
+                            className="input-field resize-none text-sm w-full"
+                            autoFocus
+                          />
+                          <div className="flex items-center gap-3 flex-wrap">
+                            <select
+                              value={newNoteRisk}
+                              onChange={e => setNewNoteRisk(e.target.value)}
+                              className="input-field !py-2 text-sm w-auto"
+                            >
+                              <option value="low">Low Risk</option>
+                              <option value="medium">Medium Risk</option>
+                              <option value="high">High Risk</option>
+                              <option value="critical">Critical</option>
+                            </select>
+                            <button
+                              onClick={handleSaveClinicalNote}
+                              disabled={savingNote}
+                              className="btn-primary text-sm flex items-center gap-1 !py-2"
+                            >
+                              {savingNote ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                              Save Note
+                            </button>
+                            <button onClick={() => { setAddingNote(false); setNewNoteText(''); }} className="btn-outline text-sm !py-2">Cancel</button>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
                     <div className="space-y-3">
                       {(patientDetail?.sessionNotes || []).map((note, i) => (
                         <div key={note._id || i} className="p-4 rounded-2xl border border-gray-100 hover:border-primary/20 transition-colors">
@@ -517,8 +649,8 @@ const AdminPatients = () => {
                           {note.plan && <p className="text-sm text-text-secondary leading-relaxed">{note.plan}</p>}
                         </div>
                       ))}
-                      {(!patientDetail?.sessionNotes || patientDetail.sessionNotes.length === 0) && (
-                        <p className="text-center py-8 text-text-secondary text-sm">No clinical notes yet</p>
+                      {(!patientDetail?.sessionNotes || patientDetail.sessionNotes.length === 0) && !addingNote && (
+                        <p className="text-center py-8 text-text-secondary text-sm">No clinical notes yet. Click "Add Note" to start.</p>
                       )}
                     </div>
                   </div>
@@ -573,6 +705,85 @@ const AdminPatients = () => {
           )}
         </motion.div>
       </main>
+
+      {/* ── Send Email Modal ──────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {showEmailModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={() => { setShowEmailModal(false); setEmailDescription(''); }}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              onClick={e => e.stopPropagation()}
+              className="bg-white rounded-2xl w-full max-w-lg shadow-xl overflow-hidden"
+            >
+              {/* Modal Header */}
+              <div className="flex items-center justify-between p-5 border-b border-gray-100">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-primary-light flex items-center justify-center">
+                    <Mail className="w-4 h-4 text-primary" />
+                  </div>
+                  <div>
+                    <h3 className="font-display font-bold text-text-primary">Send Email</h3>
+                    <p className="text-xs text-text-secondary">To: {selectedPatient?.name} · {selectedPatient?.email}</p>
+                  </div>
+                </div>
+                <button onClick={() => { setShowEmailModal(false); setEmailDescription(''); }} className="p-2 rounded-xl hover:bg-gray-100 text-text-secondary">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Email preview info */}
+              <div className="mx-5 mt-4 p-3 rounded-xl bg-primary-light/50 border border-primary/10">
+                <p className="text-xs font-semibold text-primary mb-1">Email will be sent with:</p>
+                <p className="text-xs text-text-secondary"><span className="font-medium text-text-primary">Subject:</span> 📩 Message from Dr. [Your Name] — YourTherapist</p>
+                <p className="text-xs text-text-secondary mt-0.5"><span className="font-medium text-text-primary">Includes:</span> Your name, specialization, date, and a "Open Messages" button</p>
+              </div>
+
+              {/* Description input */}
+              <div className="p-5">
+                <label className="text-sm font-semibold text-text-primary mb-2 block">
+                  Your Message <span className="text-danger">*</span>
+                </label>
+                <textarea
+                  value={emailDescription}
+                  onChange={e => setEmailDescription(e.target.value)}
+                  placeholder="Write your message to the patient here...&#10;&#10;Example: I've reviewed your recent sessions and wanted to share some thoughts on your progress. Please make sure to practice the breathing exercises we discussed..."
+                  rows={6}
+                  className="input-field resize-none text-sm"
+                  autoFocus
+                />
+                <p className="text-xs text-text-secondary mt-1.5">This will appear as the main message body inside a professionally styled email.</p>
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-3 px-5 pb-5">
+                <button
+                  onClick={() => { setShowEmailModal(false); setEmailDescription(''); }}
+                  className="btn-outline flex-1"
+                  disabled={sendingEmail}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSendEmail}
+                  disabled={sendingEmail || !emailDescription.trim()}
+                  className="btn-primary flex-1 flex items-center justify-center gap-2 disabled:opacity-60"
+                >
+                  {sendingEmail ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  {sendingEmail ? 'Sending...' : 'Send Email'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

@@ -48,13 +48,19 @@ export const getPatients = async (req, res, next) => {
         else if (recent < older - 0.5) moodTrend = 'down';
       }
 
+      const patientJson = patient.toJSON();
+      // Prefer User model values (set by doctor via update API)
+      // Fall back to latest session note if User value is blank
+      const riskLevel = patientJson.riskLevel || latestNote?.riskLevel || 'low';
+      const diagnosis = patientJson.diagnosis || latestNote?.diagnosis || '';
+
       return {
-        ...patient.toJSON(),
+        ...patientJson,
         sessions: sessionCount,
         lastSession: appointments[0]?.date || null,
         nextSession: null,
-        riskLevel: latestNote?.riskLevel || 'low',
-        diagnosis: latestNote?.diagnosis || '',
+        riskLevel,
+        diagnosis,
         moodScore: avgMood ? parseFloat(avgMood) : null,
         moodTrend,
         progressStatus: latestNote?.progressStatus || 'initial',
@@ -297,10 +303,22 @@ export const updatePatientInfo = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Patient not found' });
     }
 
+    // Save to User model
     if (riskLevel !== undefined) patient.riskLevel = riskLevel;
     if (diagnosis !== undefined) patient.diagnosis = diagnosis;
-
     await patient.save();
+
+    // Also sync to the latest SessionNote so history is consistent
+    const latestNote = await SessionNote.findOne({
+      patient: id,
+      doctor: req.user._id,
+    }).sort({ createdAt: -1 });
+
+    if (latestNote) {
+      if (riskLevel !== undefined) latestNote.riskLevel = riskLevel;
+      if (diagnosis !== undefined) latestNote.diagnosis = diagnosis;
+      await latestNote.save();
+    }
 
     res.status(200).json({ success: true, data: patient });
   } catch (error) {

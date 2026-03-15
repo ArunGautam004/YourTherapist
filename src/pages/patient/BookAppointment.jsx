@@ -8,21 +8,31 @@ import {
 import toast from 'react-hot-toast';
 import Sidebar from '../../components/layout/Sidebar';
 import { useAuth } from '../../context/AuthContext';
-import { appointmentAPI, doctorAPI } from '../../services/api';
-
-const patientLinks = [
-  { name: 'Dashboard', path: '/patient/dashboard', icon: LayoutDashboard },
-  { name: 'My Sessions', path: '/patient/sessions', icon: Clock },
-  { name: 'Book Appointment', path: '/patient/book', icon: Calendar },
-  { name: 'Mood Journal', path: '/patient/journal', icon: BookOpen },
-  { name: 'Messages', path: '/patient/messages', icon: MessageCircle },
-  { name: 'Settings', path: '/patient/settings', icon: Settings },
-];
+import { appointmentAPI, doctorAPI, messageAPI } from '../../services/api';
 
 const BookAppointment = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [step, setStep] = useState(1);
+  const [totalUnread, setTotalUnread] = useState(0);
+
+  // Consistent sidebar — live unread badge
+  const patientLinks = [
+    { name: 'Dashboard',        path: '/patient/dashboard', icon: LayoutDashboard },
+    { name: 'My Sessions',      path: '/patient/sessions',  icon: Clock },
+    { name: 'Book Appointment', path: '/patient/book',      icon: Calendar },
+    { name: 'Mood Journal',     path: '/patient/journal',   icon: BookOpen },
+    { name: 'Messages',         path: '/patient/messages',  icon: MessageCircle, badge: totalUnread > 0 ? String(totalUnread) : null },
+    { name: 'Settings',         path: '/patient/settings',  icon: Settings },
+  ];
+
+  useEffect(() => {
+    messageAPI.getConversations()
+      .then(({ data }) => {
+        const u = (data.conversations || []).reduce((s, c) => s + (c.unreadCount || 0), 0);
+        setTotalUnread(u);
+      }).catch(() => {});
+  }, []);
   const [selectedDate, setSelectedDate] = useState(null);
   const [selectedTime, setSelectedTime] = useState(null);
   const [availableSlots, setAvailableSlots] = useState([]);
@@ -224,8 +234,12 @@ const BookAppointment = () => {
                       className={`w-full p-5 rounded-2xl border-2 transition-all text-left flex items-start gap-4 ${selectedDoctor?._id === doc._id ? 'border-primary bg-primary-light shadow-glow' : 'border-gray-100 hover:border-primary/30'
                         }`}
                     >
-                      <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-primary to-secondary flex items-center justify-center flex-shrink-0">
-                        <UserIcon className="w-7 h-7 text-white" />
+                      <div className="w-14 h-14 rounded-2xl bg-primary-light flex items-center justify-center flex-shrink-0 overflow-hidden">
+                        {doc.profilePic
+                          ? <img src={doc.profilePic} alt={doc.name} className="w-full h-full object-cover" />
+                          : <div className="w-full h-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center">
+                              <UserIcon className="w-7 h-7 text-white" />
+                            </div>}
                       </div>
                       <div className="flex-1">
                         <p className="font-semibold text-text-primary text-lg">{doc.name}</p>

@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard, Users, Calendar as CalendarIcon, BarChart3, MessageCircle, Settings,
-  ChevronLeft, ChevronRight, Video, MessageSquare, Clock, X, Save, Loader2, ClipboardList
+  ChevronLeft, ChevronRight, Video, MessageSquare, Clock, X, Save, Loader2, ClipboardList,
+  UserCircle
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Sidebar from '../../components/layout/Sidebar';
@@ -22,12 +23,11 @@ const adminLinks = [
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-// Every 30 minutes from 12:00 AM to 11:00 PM
+// Every 30 minutes from 12:00 AM to 11:30 PM
 const TIME_OPTIONS = (() => {
   const options = [];
   for (let h = 0; h <= 23; h++) {
     for (let m = 0; m < 60; m += 30) {
-      if (h === 23 && m > 0) break;
       const period = h >= 12 ? 'PM' : 'AM';
       const display = h > 12 ? h - 12 : h === 0 ? 12 : h;
       options.push(`${display}:${m.toString().padStart(2, '0')} ${period}`);
@@ -50,8 +50,16 @@ function getWeekStart(date) {
   return d;
 }
 
+const parseTime = (t) => {
+  const [time, period] = (t || '').split(' ');
+  let [h, m] = (time || '0:0').split(':').map(Number);
+  if (period === 'PM' && h !== 12) h += 12;
+  if (period === 'AM' && h === 12) h = 0;
+  return h * 60 + (m || 0);
+};
+
 const AdminCalendar = () => {
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
   const navigate = useNavigate();
   const [currentWeek, setCurrentWeek] = useState(getWeekStart(new Date()));
   const [appointments, setAppointments] = useState([]);
@@ -61,13 +69,16 @@ const AdminCalendar = () => {
   const [savingSlots, setSavingSlots] = useState(false);
   const [consultationFee, setConsultationFee] = useState(1500);
 
+  // Popover state for clicked appointment
+  const [popover, setPopover] = useState(null); // { apt, x, y }
+
   const weekDays = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(currentWeek);
     d.setDate(d.getDate() + i);
     return d;
   });
 
-  // Load current availability from user profile
+  // Load availability from user profile
   useEffect(() => {
     if (user?.availableSlots) {
       const merged = DAYS.map(day => {
@@ -86,7 +97,8 @@ const AdminCalendar = () => {
       setLoading(true);
       try {
         const { data } = await appointmentAPI.getAll();
-        setAppointments(data.appointments || []);
+        // Only paid appointments
+        setAppointments((data.appointments || []).filter(a => a.paymentStatus === 'paid'));
       } catch (err) {
         console.error(err);
       } finally {
@@ -98,14 +110,6 @@ const AdminCalendar = () => {
 
   const getAppointmentForSlot = (date, time) =>
     appointments.find(apt => new Date(apt.date).toDateString() === date.toDateString() && apt.time === time);
-
-  const parseTime = (t) => {
-    const [time, period] = t.split(' ');
-    let [h, m] = time.split(':').map(Number);
-    if (period === 'PM' && h !== 12) h += 12;
-    if (period === 'AM' && h === 12) h = 0;
-    return h * 60 + (m || 0);
-  };
 
   const getTimeSlotsForDay = (date) => {
     const dayName = date.toLocaleDateString('en', { weekday: 'long' });
@@ -130,6 +134,26 @@ const AdminCalendar = () => {
   const allTimeSlots = [...new Set(weekDays.flatMap(day => getTimeSlotsForDay(day)))]
     .sort((a, b) => parseTime(a) - parseTime(b));
 
+  // Get appointment display status
+  const getAptStatus = (apt) => {
+    if (!apt) return null;
+    if (apt.status === 'cancelled') return 'cancelled';
+
+    const aptDate = new Date(apt.date);
+    const [tPart, tPeriod] = (apt.time || '').split(' ');
+    let [tH, tM] = (tPart || '0:0').split(':').map(Number);
+    if (tPeriod === 'PM' && tH !== 12) tH += 12;
+    if (tPeriod === 'AM' && tH === 12) tH = 0;
+    aptDate.setHours(tH, tM || 0, 0, 0);
+
+    const now = new Date();
+    const endTime = new Date(aptDate.getTime() + (apt.duration || 50) * 60000);
+
+    if (now >= aptDate && now <= endTime) return 'ongoing';
+    if (now > endTime || apt.status === 'completed') return 'ended';
+    return 'upcoming';
+  };
+
   const prevWeek = () => {
     const d = new Date(currentWeek);
     d.setDate(d.getDate() - 7);
@@ -149,7 +173,6 @@ const AdminCalendar = () => {
   };
 
   const handleSaveAvailability = async () => {
-    // Validate: endTime must be after startTime for enabled days
     for (const slot of slots.filter(s => s.enabled)) {
       if (parseTime(slot.endTime) <= parseTime(slot.startTime)) {
         toast.error(`${slot.day}: End time must be after start time`);
@@ -162,8 +185,8 @@ const AdminCalendar = () => {
       const availableSlots = slots
         .filter(s => s.enabled)
         .map(({ day, startTime, endTime }) => ({ day, startTime, endTime }));
-
-      await authAPI.updateProfile({ availableSlots, consultationFee });
+      const { data } = await authAPI.updateProfile({ availableSlots, consultationFee });
+      if (data.user) updateUser(data.user);
       toast.success('Availability and fees updated! ✅');
       setShowAvailability(false);
     } catch (err) {
@@ -179,14 +202,14 @@ const AdminCalendar = () => {
   const updateSlot = (day, field, value) =>
     setSlots(prev => prev.map(s => s.day === day ? { ...s, [field]: value } : s));
 
-  // Quick presets
   const applyPreset = (preset) => {
     const presets = {
       weekdays: { days: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'], start: '9:00 AM', end: '5:00 PM' },
       morning:  { days: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'], start: '7:00 AM', end: '1:00 PM' },
-      evening:  { days: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'], start: '2:00 PM', end: '8:00 PM' },
+      evening:  { days: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'], start: '2:00 PM', end: '11:00 PM' },
     };
     const p = presets[preset];
+    if (!p) return;
     setSlots(prev => prev.map(s => ({
       ...s,
       enabled: p.days.includes(s.day),
@@ -195,42 +218,82 @@ const AdminCalendar = () => {
     })));
   };
 
+  const handleAptClick = (e, apt) => {
+    e.stopPropagation();
+    setPopover({ apt });
+  };
+
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background" onClick={() => setPopover(null)}>
       <Sidebar links={adminLinks} userRole="admin" />
 
       <main className="lg:ml-[260px] pt-20 lg:pt-6 p-4 md:p-6 lg:p-8">
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="max-w-7xl mx-auto">
-          <div className="flex items-center justify-between mb-8">
+
+          {/* Header */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
             <div>
               <h1 className="font-display text-2xl md:text-3xl font-bold text-text-primary">
                 Session <span className="gradient-text">Calendar</span>
               </h1>
-              <p className="text-text-secondary mt-1">Manage your schedule and availability</p>
+              <p className="text-text-secondary mt-0.5 text-sm">
+                {weekDays[0].toLocaleDateString('en', { month: 'long', year: 'numeric' })}
+                {' · '}
+                <span className="text-text-primary font-medium">{appointments.filter(a => weekDays.some(d => new Date(a.date).toDateString() === d.toDateString())).length} sessions this week</span>
+              </p>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Today button */}
               <button
-                onClick={() => setShowAvailability(true)}
-                className="btn-primary flex items-center gap-2 !py-2.5"
+                onClick={() => setCurrentWeek(getWeekStart(new Date()))}
+                className="px-3 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-text-secondary text-sm font-medium transition-colors"
               >
-                <Clock className="w-4 h-4" />
-                <span className="hidden sm:inline">Manage Availability</span>
+                Today
               </button>
-              <div className="flex items-center gap-2">
-                <button onClick={prevWeek} className="p-2 rounded-xl hover:bg-gray-100 text-text-secondary transition-colors">
-                  <ChevronLeft className="w-5 h-5" />
+              {/* Week navigation */}
+              <div className="flex items-center gap-1 bg-white border border-gray-200 rounded-xl overflow-hidden shadow-soft">
+                <button onClick={prevWeek} className="p-2 hover:bg-gray-50 text-text-secondary transition-colors">
+                  <ChevronLeft className="w-4 h-4" />
                 </button>
-                <span className="text-sm font-semibold text-text-primary min-w-[180px] text-center">
-                  {weekDays[0].toLocaleDateString('en', { month: 'short', day: 'numeric' })} — {weekDays[6].toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' })}
+                <span className="text-sm font-semibold text-text-primary px-2 min-w-[150px] text-center">
+                  {weekDays[0].toLocaleDateString('en', { month: 'short', day: 'numeric' })} – {weekDays[6].toLocaleDateString('en', { month: 'short', day: 'numeric' })}
                 </span>
-                <button onClick={nextWeek} className="p-2 rounded-xl hover:bg-gray-100 text-text-secondary transition-colors">
-                  <ChevronRight className="w-5 h-5" />
+                <button onClick={nextWeek} className="p-2 hover:bg-gray-50 text-text-secondary transition-colors">
+                  <ChevronRight className="w-4 h-4" />
                 </button>
               </div>
+              <button
+                onClick={() => setShowAvailability(true)}
+                className="btn-primary flex items-center gap-2 !py-2"
+              >
+                <Clock className="w-4 h-4" />
+                <span className="hidden sm:inline text-sm">Availability</span>
+              </button>
             </div>
           </div>
 
-          <div className="card overflow-x-auto">
+          {/* Legend + summary pills */}
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+            <div className="flex items-center gap-4 flex-wrap text-xs font-medium text-text-secondary">
+              <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block" /> Ongoing</div>
+              <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-primary inline-block" /> Upcoming</div>
+              <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-gray-300 inline-block" /> Ended</div>
+              <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-green-300 inline-block border border-dashed border-green-400" /> Available</div>
+            </div>
+            {/* Session count pills for the week */}
+            <div className="flex items-center gap-2 text-xs">
+              {[
+                { label: 'Ongoing', color: 'bg-amber-100 text-amber-700', count: appointments.filter(a => getAptStatus(a) === 'ongoing').length },
+                { label: 'Upcoming', color: 'bg-primary/10 text-primary', count: appointments.filter(a => getAptStatus(a) === 'upcoming').length },
+              ].map(p => p.count > 0 && (
+                <span key={p.label} className={`px-2.5 py-1 rounded-full font-semibold ${p.color}`}>
+                  {p.count} {p.label}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div className="card overflow-x-auto relative">
             {loading ? (
               <div className="flex items-center justify-center py-16">
                 <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin" />
@@ -259,22 +322,42 @@ const AdminCalendar = () => {
                         const daySlots = getTimeSlotsForDay(day);
                         const isAvailable = daySlots.includes(time);
                         const apt = getAppointmentForSlot(day, time);
+                        const aptStatus = getAptStatus(apt);
+
+                        // Slot cell styles based on status
+                        let cellStyle = '';
+                        let labelStyle = '';
+                        let statusLabel = '';
+
+                        if (apt) {
+                          if (aptStatus === 'ongoing') {
+                            cellStyle = 'bg-amber-50 border border-amber-300 shadow-sm';
+                            labelStyle = 'text-amber-700';
+                            statusLabel = '● Ongoing';
+                          } else if (aptStatus === 'ended') {
+                            cellStyle = 'bg-gray-100 border border-gray-200 opacity-70';
+                            labelStyle = 'text-gray-500';
+                            statusLabel = 'Ended';
+                          } else {
+                            cellStyle = 'bg-primary-light border border-primary/20 shadow-sm';
+                            labelStyle = 'text-primary';
+                            statusLabel = 'Upcoming';
+                          }
+                        }
+
                         return (
                           <td key={day.toISOString()} className="py-1 px-1">
                             {apt ? (
                               <div
-                                onClick={() => apt.patient?._id && navigate(`/admin/patients?selected=${apt.patient._id}`)}
-                                className={`p-2 rounded-xl text-xs transition-all hover:shadow-soft cursor-pointer hover:scale-[1.02] ${
-                                  apt.status === 'completed' ? 'bg-success/10 border border-success/20' :
-                                  apt.status === 'cancelled' ? 'bg-gray-100 border border-gray-200 opacity-50' :
-                                  'bg-primary-light border border-primary/10'
-                                }`}>
+                                onClick={(e) => handleAptClick(e, apt)}
+                                className={`p-2 rounded-xl text-xs transition-all hover:shadow-soft cursor-pointer hover:scale-[1.02] ${cellStyle}`}
+                              >
                                 <p className="font-semibold text-text-primary truncate">{apt.patient?.name || 'Patient'}</p>
-                                <div className="flex items-center gap-1 mt-1 text-text-secondary">
+                                <div className="flex items-center gap-1 mt-0.5 text-text-secondary">
                                   {apt.type === 'video' ? <Video className="w-3 h-3" /> : <MessageSquare className="w-3 h-3" />}
                                   <span>{apt.duration || 50}min</span>
                                 </div>
-                                <p className="text-[9px] text-primary/70 mt-1 font-medium">View profile →</p>
+                                <p className={`text-[9px] mt-1 font-semibold ${labelStyle}`}>{statusLabel}</p>
                               </div>
                             ) : isAvailable ? (
                               <div className="h-12 rounded-xl border border-dashed border-green-200 bg-green-50/30 hover:border-primary/30 transition-colors flex items-center justify-center">
@@ -304,7 +387,68 @@ const AdminCalendar = () => {
         </motion.div>
       </main>
 
-      {/* ── Availability Modal ───────────────────────────────────────────── */}
+      {/* Appointment popover */}
+      <AnimatePresence>
+        {popover && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
+            onClick={() => setPopover(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-2xl shadow-xl p-5 w-72 max-w-full"
+              onClick={e => e.stopPropagation()}
+            >
+              {(() => {
+                const apt = popover.apt;
+                const status = getAptStatus(apt);
+                return (
+                  <>
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="font-bold text-text-primary">{apt.patient?.name || 'Patient'}</h3>
+                      <button onClick={() => setPopover(null)} className="p-1 rounded-lg hover:bg-gray-100"><X className="w-4 h-4" /></button>
+                    </div>
+                    <div className="space-y-2 text-sm text-text-secondary mb-4">
+                      <p><span className="font-medium text-text-primary">Time:</span> {apt.time}</p>
+                      <p><span className="font-medium text-text-primary">Duration:</span> {apt.duration || 50} min</p>
+                      <p><span className="font-medium text-text-primary">Type:</span> {apt.type === 'video' ? 'Video Call' : 'Chat'}</p>
+                      <p>
+                        <span className="font-medium text-text-primary">Status: </span>
+                        <span className={`font-semibold capitalize ${status === 'ongoing' ? 'text-amber-600' : status === 'ended' ? 'text-gray-500' : 'text-primary'}`}>
+                          {status}
+                        </span>
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => { setPopover(null); navigate(`/admin/patients?selected=${apt.patient?._id}`); }}
+                        className="flex-1 flex items-center justify-center gap-1 btn-outline text-sm !py-2"
+                      >
+                        <UserCircle className="w-4 h-4" /> Patient Profile
+                      </button>
+                      {status === 'ongoing' && apt.meetingLink && (
+                        <button
+                          onClick={() => { setPopover(null); navigate(apt.meetingLink); }}
+                          className="flex-1 flex items-center justify-center gap-1 btn-primary text-sm !py-2"
+                        >
+                          <Video className="w-4 h-4" /> Join
+                        </button>
+                      )}
+                    </div>
+                  </>
+                );
+              })()}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Availability Modal */}
       <AnimatePresence>
         {showAvailability && (
           <motion.div
@@ -321,7 +465,6 @@ const AdminCalendar = () => {
               onClick={(e) => e.stopPropagation()}
               className="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto"
             >
-              {/* Header */}
               <div className="flex items-center justify-between p-6 border-b border-gray-100">
                 <div>
                   <h2 className="font-display font-bold text-xl text-text-primary">Manage Availability</h2>
@@ -355,7 +498,7 @@ const AdminCalendar = () => {
                     {[
                       { key: 'weekdays', label: '9 AM – 5 PM Weekdays' },
                       { key: 'morning',  label: '7 AM – 1 PM Weekdays' },
-                      { key: 'evening',  label: '2 PM – 8 PM Weekdays' },
+                      { key: 'evening',  label: '2 PM – 11 PM Weekdays' },
                     ].map(p => (
                       <button
                         key={p.key}
@@ -377,9 +520,7 @@ const AdminCalendar = () => {
                         key={slot.day}
                         className={`rounded-2xl border transition-all ${slot.enabled ? 'border-primary/20 bg-primary-light/30' : 'border-gray-100 bg-gray-50'}`}
                       >
-                        {/* Day toggle row */}
                         <div className="flex items-center gap-3 p-3">
-                          {/* Toggle */}
                           <button
                             onClick={() => toggleDay(slot.day)}
                             className={`w-10 h-6 rounded-full transition-all flex-shrink-0 relative ${slot.enabled ? 'bg-primary' : 'bg-gray-300'}`}
@@ -394,7 +535,6 @@ const AdminCalendar = () => {
                           )}
                         </div>
 
-                        {/* Time pickers — shown only when enabled */}
                         {slot.enabled && (
                           <div className="px-3 pb-3 flex items-center gap-2">
                             <div className="flex-1">
@@ -417,7 +557,7 @@ const AdminCalendar = () => {
                                 onChange={(e) => updateSlot(slot.day, 'endTime', e.target.value)}
                                 className="input-field !py-2 !text-sm w-full"
                               >
-                                {/* Only show times after startTime */}
+                                {/* ✅ Show ALL times after start — including up to 11:30 PM */}
                                 {TIME_OPTIONS.filter(t => parseTime(t) > parseTime(slot.startTime)).map(t => (
                                   <option key={t} value={t}>{t}</option>
                                 ))}

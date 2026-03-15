@@ -39,13 +39,14 @@ export const authAPI = {
 };
 
 export const appointmentAPI = {
-  getAll:        (params)         => api.get('/appointments', { params }),
-  getById:       (id)             => api.get(`/appointments/${id}`),
-  create:        (data)           => api.post('/appointments', data),
-  update:        (id, data)       => api.put(`/appointments/${id}`, data),
-  verifyPayment: (data)           => api.post('/appointments/verify-payment', data),
-  getToday:      ()               => api.get('/appointments/today'),
-  getSlots:      (doctorId, date) => api.get(`/appointments/slots/${doctorId}/${date}`),
+  getAll:           (params)         => api.get('/appointments', { params }),
+  getById:          (id)             => api.get(`/appointments/${id}`),
+  getByMeetingLink: (uuid)           => api.get(`/appointments/by-link/${uuid}`),
+  create:           (data)           => api.post('/appointments', data),
+  update:           (id, data)       => api.put(`/appointments/${id}`, data),
+  verifyPayment:    (data)           => api.post('/appointments/verify-payment', data),
+  getToday:         ()               => api.get('/appointments/today'),
+  getSlots:         (doctorId, date) => api.get(`/appointments/slots/${doctorId}/${date}`),
 };
 
 export const doctorAPI = {
@@ -63,14 +64,15 @@ export const patientAPI = {
 export const moodAPI = {
   getEntries: (days) => api.get('/mood', { params: { days } }),
   create:     (data) => api.post('/mood', data),
-  delete:     (id)   => api.delete(`/mood/${id}`),
+  // Delete is intentionally removed — past moods are permanent
 };
 
 export const messageAPI = {
-  getConversations: ()               => api.get('/messages/conversations'),
-  getMessages:      (userId, params) => api.get(`/messages/${userId}`, { params }),
-  send:             (data)           => api.post('/messages', data),
-  markAsRead:       (senderId)       => api.put(`/messages/read/${senderId}`),
+  getConversations:    ()               => api.get('/messages/conversations'),
+  getMessages:         (userId, params) => api.get(`/messages/${userId}`, { params }),
+  send:                (data)           => api.post('/messages', data),
+  markAsRead:          (senderId)       => api.put(`/messages/read/${senderId}`),
+  sendEmailToPatient:  (data)           => api.post('/messages/email-patient', data),
 };
 
 export const sessionAPI = {
@@ -96,7 +98,8 @@ export const notificationAPI = {
 };
 
 export const uploadAPI = {
-  uploadImage: (formData) => api.post('/upload/image', formData, {
+  // FIX: backend route is POST /api/upload (not /api/upload/image)
+  uploadImage: (formData) => api.post('/upload', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   }),
 };

@@ -3,11 +3,11 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import {
     LayoutDashboard, Calendar, BookOpen, MessageCircle, Settings,
-    Video, Clock, X, FileText, ClipboardList, ChevronRight, Loader2
+    Video, Clock, X, FileText, ClipboardList, Loader2
 } from 'lucide-react';
 import Sidebar from '../../components/layout/Sidebar';
 import { useAuth } from '../../context/AuthContext';
-import { appointmentAPI, sessionAPI } from '../../services/api';
+import { sessionAPI, appointmentAPI, messageAPI } from '../../services/api';
 
 const fadeInUp = {
     hidden: { opacity: 0, y: 20 },
@@ -19,15 +19,6 @@ const stagger = {
     visible: { transition: { staggerChildren: 0.1 } },
 };
 
-const patientLinks = [
-    { name: 'Dashboard', path: '/patient/dashboard', icon: LayoutDashboard },
-    { name: 'My Sessions', path: '/patient/sessions', icon: Clock },
-    { name: 'Book Appointment', path: '/patient/book', icon: Calendar },
-    { name: 'Mood Journal', path: '/patient/journal', icon: BookOpen },
-    { name: 'Messages', path: '/patient/messages', icon: MessageCircle },
-    { name: 'Settings', path: '/patient/settings', icon: Settings },
-];
-
 const PatientSessions = () => {
     const { user } = useAuth();
     const [appointments, setAppointments] = useState([]);
@@ -35,21 +26,58 @@ const PatientSessions = () => {
     const [selectedSession, setSelectedSession] = useState(null);
     const [sessionDetail, setSessionDetail] = useState(null);
     const [detailLoading, setDetailLoading] = useState(false);
+    const [totalUnread, setTotalUnread] = useState(0);
+
+    // Consistent sidebar — live unread badge
+    const patientLinks = [
+        { name: 'Dashboard',        path: '/patient/dashboard', icon: LayoutDashboard },
+        { name: 'My Sessions',      path: '/patient/sessions',  icon: Clock },
+        { name: 'Book Appointment', path: '/patient/book',      icon: Calendar },
+        { name: 'Mood Journal',     path: '/patient/journal',   icon: BookOpen },
+        { name: 'Messages',         path: '/patient/messages',  icon: MessageCircle, badge: totalUnread > 0 ? String(totalUnread) : null },
+        { name: 'Settings',         path: '/patient/settings',  icon: Settings },
+    ];
+
+    useEffect(() => {
+        messageAPI.getConversations()
+            .then(({ data }) => {
+                const u = (data.conversations || []).reduce((s, c) => s + (c.unreadCount || 0), 0);
+                setTotalUnread(u);
+            }).catch(() => {});
+    }, []);
 
     useEffect(() => {
         const fetchAppointments = async () => {
             try {
                 setLoading(true);
-                const res = await sessionAPI.getMyHistory();
-                const sessionHistory = res.data.sessions || [];
-                // map session history to extract just the appointments for the dashboard format
-                const apts = sessionHistory.map(s => {
-                    const apt = s.appointment;
-                    apt.sessionNote = s.sessionNote;
-                    apt.questionnaireResponses = s.questionnaireResponses;
-                    return apt;
-                });
-                setAppointments(apts);
+
+                // Fetch all paid appointments (includes upcoming with populated doctor)
+                const allRes = await appointmentAPI.getAll();
+                const allApts = (allRes.data.appointments || []);
+
+                // Also fetch session history to attach notes/questionnaire data
+                let historyMap = {};
+                try {
+                    const histRes = await sessionAPI.getMyHistory();
+                    (histRes.data.sessions || []).forEach(s => {
+                        if (s.appointment?._id) {
+                            historyMap[s.appointment._id] = {
+                                sessionNote: s.sessionNote,
+                                questionnaireResponses: s.questionnaireResponses,
+                            };
+                        }
+                    });
+                } catch (_) { /* history fetch optional */ }
+
+                const merged = allApts
+                    .filter(apt => apt.paymentStatus === 'paid')
+                    .map(apt => ({
+                        ...apt,
+                        doctor: apt.doctor && typeof apt.doctor === 'object' ? apt.doctor : null,
+                        ...(historyMap[apt._id] || {}),
+                    }));
+
+                setAppointments(merged);
             } catch (err) {
                 console.error('Failed to load appointments:', err);
             } finally {
@@ -75,7 +103,7 @@ const PatientSessions = () => {
 
     const sortedAppointments = [...appointments].map(apt => {
         const safeDate = new Date(apt.date || Date.now());
-        
+
         const timeStr = String(apt.time || '12:00 PM').toUpperCase();
         let tH = 12, tM = 0;
         const timeMatch = timeStr.match(/(\d+):?(\d+)?/);
@@ -86,8 +114,8 @@ const PatientSessions = () => {
         if (timeStr.includes('PM') && tH < 12) tH += 12;
         if (timeStr.includes('AM') && tH === 12) tH = 0;
 
-        let aptDate = new Date(safeDate.getFullYear(), safeDate.getMonth(), safeDate.getDate(), tH, tM, 0, 0);
-        let endTime = new Date(aptDate.getTime() + (apt.duration || 50) * 60000);
+        const aptDate = new Date(safeDate.getFullYear(), safeDate.getMonth(), safeDate.getDate(), tH, tM, 0, 0);
+        const endTime = new Date(aptDate.getTime() + (apt.duration || 50) * 60000);
 
         const now = new Date();
         const isValidDate = !isNaN(aptDate.getTime());
@@ -95,6 +123,9 @@ const PatientSessions = () => {
 
         const isOngoing = isValidDate && diff <= 10 && now < endTime && apt.status !== 'cancelled';
         const isPast = ['completed', 'cancelled', 'no-show'].includes(apt.status) || (isValidDate && now >= endTime);
+
+        // ✅ Session link is only active 10 min before to session end
+        const isLinkActive = isValidDate && diff <= 10 && now < endTime;
 
         let displayStatus = 'Upcoming';
         if (!isValidDate) {
@@ -114,56 +145,78 @@ const PatientSessions = () => {
             else displayStatus = `In ${hours}h`;
         }
 
-        return { ...apt, aptDate, isValidDate, safeDate, diff, isOngoing, isPast, displayStatus };
+        return { ...apt, aptDate, isValidDate, safeDate, diff, isOngoing, isPast, displayStatus, isLinkActive };
     }).sort((a, b) => {
+        // Ongoing first, then upcoming, then past
+        if (a.isOngoing && !b.isOngoing) return -1;
+        if (!a.isOngoing && b.isOngoing) return 1;
+        if (!a.isPast && b.isPast) return -1;
+        if (a.isPast && !b.isPast) return 1;
         return (a.aptDate?.getTime() || 0) - (b.aptDate?.getTime() || 0);
     });
 
+    // ✅ Simplified render: ended/ongoing only show View Details + Join link
     const renderAppointment = (apt) => (
-        <div key={apt._id} className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 rounded-2xl border border-gray-100 bg-gray-50/50 hover:bg-gray-50 transition-colors">
+        <div key={apt._id} className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 p-4 rounded-2xl border border-gray-100 bg-gray-50/50 hover:bg-gray-50 transition-colors">
             <div className="flex items-center gap-4 flex-1">
-                <div className="w-14 h-14 rounded-2xl bg-primary-light flex items-center justify-center flex-shrink-0">
-                    <span className="text-2xl">👨‍⚕️</span>
+                <div className="w-12 h-12 rounded-2xl bg-primary-light flex items-center justify-center flex-shrink-0 overflow-hidden">
+                    {apt.doctor?.profilePic
+                        ? <img src={apt.doctor.profilePic} alt={apt.doctor.name} className="w-full h-full object-cover" />
+                        : <span className="text-2xl">👨‍⚕️</span>}
                 </div>
                 <div>
-                    <p className="font-semibold text-text-primary text-lg">{apt.doctor?.name || 'Dr. Therapist'}</p>
+                    <p className="font-semibold text-text-primary">
+                        {apt.doctor?.name
+                            ? (apt.doctor.name.toLowerCase().startsWith('dr') ? apt.doctor.name : `Dr. ${apt.doctor.name}`)
+                            : 'Dr. Therapist'}
+                    </p>
                     <p className="text-sm text-text-secondary">{apt.doctor?.specialization || 'Clinical Psychologist'}</p>
                 </div>
             </div>
 
-            <div className="flex items-center gap-4 flex-wrap sm:flex-nowrap mt-2 sm:mt-0">
-                <div className="bg-white px-4 py-2 rounded-xl border border-gray-100 flex items-center gap-2">
+            <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
+                <div className="bg-white px-3 py-2 rounded-xl border border-gray-100 flex items-center gap-2 text-sm">
                     <Calendar className="w-4 h-4 text-primary" />
-                    <div className="text-sm font-medium">
-                        {apt.isValidDate ? apt.safeDate.toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown Date'}
-                    </div>
+                    {apt.isValidDate ? apt.safeDate.toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown'}
                 </div>
-                <div className="bg-white px-4 py-2 rounded-xl border border-gray-100 flex items-center gap-2">
+                <div className="bg-white px-3 py-2 rounded-xl border border-gray-100 flex items-center gap-2 text-sm">
                     <Clock className="w-4 h-4 text-primary" />
-                    <div className="text-sm font-medium">{apt.time || 'TBD'}</div>
+                    {apt.time || 'TBD'}
                 </div>
 
-                {apt.meetingLink && apt.isOngoing ? (
-                    <Link to={apt.meetingLink} className="btn-primary whitespace-nowrap !px-6 flex items-center gap-2">
-                        <Video className="w-4 h-4" /> Join Session
-                    </Link>
+                {/* Ongoing: Join + View Details */}
+                {apt.isOngoing ? (
+                    <div className="flex items-center gap-2">
+                        {apt.isLinkActive && apt.meetingLink && (
+                            <Link to={apt.meetingLink} className="btn-primary whitespace-nowrap !px-4 !py-2 flex items-center gap-1.5 text-sm">
+                                <Video className="w-4 h-4" /> Join Session
+                            </Link>
+                        )}
+                        <button
+                            onClick={() => handleViewDetail(apt)}
+                            className="px-4 py-2 rounded-xl bg-primary-light text-primary text-sm font-medium hover:bg-primary/10 transition-colors flex items-center gap-1"
+                        >
+                            <FileText className="w-4 h-4" /> Details
+                        </button>
+                    </div>
                 ) : apt.isPast && apt.displayStatus !== 'Cancelled' ? (
+                    /* Past: View Details */
                     <button
                         onClick={() => handleViewDetail(apt)}
                         className="px-4 py-2 rounded-xl bg-primary-light text-primary text-sm font-medium hover:bg-primary/10 transition-colors flex items-center gap-1"
                     >
                         <FileText className="w-4 h-4" /> View Details
                     </button>
+                ) : apt.displayStatus === 'Cancelled' ? (
+                    /* Cancelled badge */
+                    <span className="text-sm font-medium px-4 py-2 rounded-xl bg-danger/10 text-danger">
+                        Cancelled
+                    </span>
                 ) : (
-                    <div className="w-[140px] flex justify-end">
-                        <span className={`text-sm font-medium px-4 py-2 rounded-xl text-center w-full ${apt.displayStatus === 'Cancelled' ? 'bg-danger/10 text-danger' :
-                            (apt.displayStatus === 'Ended' || apt.displayStatus === 'Expired') ? 'bg-gray-200 text-text-secondary' :
-                                apt.displayStatus === 'Ongoing' ? 'bg-success/10 text-success shadow-sm' :
-                                    'bg-primary-light text-primary'
-                            }`}>
-                            {apt.displayStatus}
-                        </span>
-                    </div>
+                    /* Upcoming: status badge only — View Details not available yet */
+                    <span className="text-sm font-medium px-3 py-1.5 rounded-xl bg-primary-light text-primary">
+                        {apt.displayStatus}
+                    </span>
                 )}
             </div>
         </div>
@@ -175,15 +228,13 @@ const PatientSessions = () => {
 
             <main className="lg:ml-[260px] pt-20 lg:pt-6 p-4 md:p-6 lg:p-8">
                 <motion.div initial="hidden" animate="visible" variants={stagger} className="max-w-5xl mx-auto">
-                    {/* Header */}
                     <motion.div variants={fadeInUp} className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
                         <div>
                             <h1 className="font-display text-2xl md:text-3xl font-bold text-text-primary">
                                 My <span className="gradient-text">Sessions</span>
                             </h1>
-                            <p className="text-text-secondary mt-1">Manage your upcoming and past therapy sessions.</p>
+                            <p className="text-text-secondary mt-1">Your therapy session history and upcoming appointments.</p>
                         </div>
-
                         <Link to="/patient/book" className="btn-primary flex items-center gap-2 self-start md:self-auto">
                             <Calendar className="w-4 h-4" /> Book New Session
                         </Link>
@@ -192,44 +243,42 @@ const PatientSessions = () => {
                     <motion.div variants={fadeInUp} className="space-y-8">
                         {loading ? (
                             <div className="flex items-center justify-center py-12">
-                                <div className="w-8 h-8 border-3 border-primary border-t-transparent rounded-full animate-spin" />
+                                <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
                             </div>
                         ) : sortedAppointments.length > 0 ? (
                             <>
                                 {/* ONGOING */}
-                                {sortedAppointments.filter((apt) => apt.isOngoing).length > 0 && (
-                                    <div className="card">
+                                {sortedAppointments.filter(a => a.isOngoing).length > 0 && (
+                                    <div className="card border-l-4 border-l-amber-400">
                                         <h2 className="text-xl font-bold text-text-primary mb-4 flex items-center gap-2">
-                                            <div className="w-2 h-2 rounded-full bg-success animate-pulse" />
+                                            <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
                                             Ongoing Session
                                         </h2>
                                         <div className="space-y-4">
-                                            {sortedAppointments.filter((apt) => apt.isOngoing).map(renderAppointment)}
+                                            {sortedAppointments.filter(a => a.isOngoing).map(renderAppointment)}
                                         </div>
                                     </div>
                                 )}
 
                                 {/* UPCOMING */}
-                                {sortedAppointments.filter((apt) => !apt.isPast && !apt.isOngoing).length > 0 && (
+                                {sortedAppointments.filter(a => !a.isPast && !a.isOngoing).length > 0 && (
                                     <div className="card">
                                         <h2 className="text-xl font-bold text-text-primary mb-4 flex items-center gap-2">
                                             <Calendar className="w-5 h-5 text-primary" />
                                             Upcoming Sessions
                                         </h2>
                                         <div className="space-y-4">
-                                            {sortedAppointments.filter((apt) => !apt.isPast && !apt.isOngoing).map(renderAppointment)}
+                                            {sortedAppointments.filter(a => !a.isPast && !a.isOngoing).map(renderAppointment)}
                                         </div>
                                     </div>
                                 )}
 
-                                {/* ENDED */}
-                                {sortedAppointments.filter((apt) => apt.isPast).length > 0 && (
+                                {/* PAST */}
+                                {sortedAppointments.filter(a => a.isPast).length > 0 && (
                                     <div className="card">
-                                        <h2 className="text-xl font-bold text-text-primary mb-4">
-                                            Past Sessions
-                                        </h2>
+                                        <h2 className="text-xl font-bold text-text-primary mb-4">Past Sessions</h2>
                                         <div className="space-y-4">
-                                            {sortedAppointments.filter((apt) => apt.isPast).reverse().map(renderAppointment)}
+                                            {sortedAppointments.filter(a => a.isPast).reverse().map(renderAppointment)}
                                         </div>
                                     </div>
                                 )}
@@ -240,7 +289,7 @@ const PatientSessions = () => {
                                     <Calendar className="w-8 h-8 text-gray-400" />
                                 </div>
                                 <h3 className="text-lg font-semibold text-text-primary mb-1">No sessions found</h3>
-                                <p className="text-text-secondary text-sm max-w-sm mx-auto mb-6">You don't have any therapy sessions scheduled.</p>
+                                <p className="text-text-secondary text-sm max-w-sm mx-auto mb-6">You don't have any confirmed therapy sessions yet.</p>
                                 <Link to="/patient/book" className="btn-primary inline-flex">Book a Session</Link>
                             </div>
                         )}
@@ -265,7 +314,6 @@ const PatientSessions = () => {
                             className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-xl"
                             onClick={(e) => e.stopPropagation()}
                         >
-                            {/* Modal Header */}
                             <div className="flex items-center justify-between p-5 border-b border-gray-100 sticky top-0 bg-white rounded-t-2xl z-10">
                                 <div>
                                     <h3 className="font-display font-bold text-lg text-text-primary">Session Details</h3>
@@ -291,31 +339,32 @@ const PatientSessions = () => {
                                     </div>
                                 ) : (
                                     <>
-                                        {/* Doctor Info */}
                                         <div className="flex items-center gap-3 p-4 rounded-xl bg-gray-50">
-                                            <div className="w-12 h-12 rounded-xl bg-primary-light flex items-center justify-center text-2xl">👨‍⚕️</div>
+                                            <div className="w-12 h-12 rounded-xl bg-primary-light flex items-center justify-center text-2xl overflow-hidden flex-shrink-0">
+                                                {selectedSession.doctor?.profilePic
+                                                    ? <img src={selectedSession.doctor.profilePic} alt={selectedSession.doctor.name} className="w-full h-full object-cover" />
+                                                    : <span>👨‍⚕️</span>}
+                                            </div>
                                             <div>
                                                 <p className="font-semibold text-text-primary">{selectedSession.doctor?.name || 'Doctor'}</p>
                                                 <p className="text-sm text-text-secondary">{selectedSession.doctor?.specialization || 'Therapist'}</p>
                                             </div>
                                         </div>
 
-                                        {/* Session Description */}
                                         <div>
                                             <h4 className="font-semibold text-text-primary mb-3 flex items-center gap-2">
                                                 <FileText className="w-4 h-4 text-primary" />
-                                                Session Description
+                                                Session Notes
                                             </h4>
                                             {sessionDetail?.sessionNote?.sessionDescription ? (
                                                 <div className="p-4 rounded-xl bg-primary-light/50 border border-primary/10">
                                                     <p className="text-sm text-text-primary leading-relaxed">{sessionDetail.sessionNote.sessionDescription}</p>
                                                 </div>
                                             ) : (
-                                                <p className="text-sm text-text-secondary italic">No session description available</p>
+                                                <p className="text-sm text-text-secondary italic">No session notes available</p>
                                             )}
                                         </div>
 
-                                        {/* Doctor's Report */}
                                         <div>
                                             <h4 className="font-semibold text-text-primary mb-3 flex items-center gap-2">
                                                 <FileText className="w-4 h-4 text-primary" />
@@ -330,7 +379,6 @@ const PatientSessions = () => {
                                             )}
                                         </div>
 
-                                        {/* Questionnaire Responses */}
                                         <div>
                                             <h4 className="font-semibold text-text-primary mb-3 flex items-center gap-2">
                                                 <ClipboardList className="w-4 h-4 text-primary" />
@@ -363,7 +411,7 @@ const PatientSessions = () => {
                                                     ))}
                                                 </div>
                                             ) : (
-                                                <p className="text-sm text-text-secondary italic">No questionnaires were submitted for this session</p>
+                                                <p className="text-sm text-text-secondary italic">No questionnaires submitted for this session</p>
                                             )}
                                         </div>
                                     </>
