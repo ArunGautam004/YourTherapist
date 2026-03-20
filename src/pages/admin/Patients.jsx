@@ -50,6 +50,12 @@ const AdminPatients = () => {
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [emailDescription, setEmailDescription] = useState('');
   const [sendingEmail, setSendingEmail] = useState(false);
+  const [showBulkMessageModal, setShowBulkMessageModal] = useState(false);
+  const [showBulkEmailModal, setShowBulkEmailModal] = useState(false);
+  const [bulkMessageText, setBulkMessageText] = useState('');
+  const [bulkEmailText, setBulkEmailText] = useState('');
+  const [sendingBulkMessage, setSendingBulkMessage] = useState(false);
+  const [sendingBulkEmail, setSendingBulkEmail] = useState(false);
 
   const handleSendEmail = async () => {
     if (!emailDescription.trim()) return toast.error('Please write a description');
@@ -59,10 +65,49 @@ const AdminPatients = () => {
       toast.success(`Email sent to ${selectedPatient.name}!`);
       setShowEmailModal(false);
       setEmailDescription('');
+      if (viewMode === 'all') setSelectedPatient(null);
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to send email');
     } finally {
       setSendingEmail(false);
+    }
+  };
+
+  const getAllPatientIds = () => [...new Set((allPatients || []).map((p) => p._id).filter(Boolean))];
+
+  const handleSendBulkMessage = async () => {
+    const patientIds = getAllPatientIds();
+    if (!patientIds.length) return toast.error('No patients found to message');
+    if (!bulkMessageText.trim()) return toast.error('Please write a message');
+
+    setSendingBulkMessage(true);
+    try {
+      const { data } = await messageAPI.sendBulkMessage({ patientIds, text: bulkMessageText.trim() });
+      toast.success(data?.message || `Message sent to ${patientIds.length} patients`);
+      setShowBulkMessageModal(false);
+      setBulkMessageText('');
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to send message to all patients');
+    } finally {
+      setSendingBulkMessage(false);
+    }
+  };
+
+  const handleSendBulkEmail = async () => {
+    const patientIds = getAllPatientIds();
+    if (!patientIds.length) return toast.error('No patients found to email');
+    if (!bulkEmailText.trim()) return toast.error('Please write an email message');
+
+    setSendingBulkEmail(true);
+    try {
+      const { data } = await messageAPI.sendBulkEmail({ patientIds, description: bulkEmailText.trim() });
+      toast.success(data?.message || `Email sent to ${patientIds.length} patients`);
+      setShowBulkEmailModal(false);
+      setBulkEmailText('');
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to send email to all patients');
+    } finally {
+      setSendingBulkEmail(false);
     }
   };
 
@@ -744,18 +789,36 @@ const AdminPatients = () => {
           ) : null}
 
           {/* ── ALL PATIENTS DIRECTORY VIEW ────────────────────────────── */}
-          {viewMode === 'all' && !selectedPatient && (
+          {viewMode === 'all' && (
             <>
               <div className="card mb-6">
-                <div className="relative">
-                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-secondary/50" />
-                  <input
-                    type="text"
-                    placeholder="Search all patients by name..."
-                    value={allPatientsSearch}
-                    onChange={(e) => setAllPatientsSearch(e.target.value)}
-                    className="input-field !pl-12"
-                  />
+                <div className="flex flex-col lg:flex-row gap-3 lg:items-center">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-secondary/50" />
+                    <input
+                      type="text"
+                      placeholder="Search all patients by name..."
+                      value={allPatientsSearch}
+                      onChange={(e) => setAllPatientsSearch(e.target.value)}
+                      className="input-field !pl-12"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setShowBulkMessageModal(true)}
+                      disabled={allPatientsLoading || allPatients.length === 0}
+                      className="btn-primary flex items-center gap-2 !py-2.5 text-sm disabled:opacity-50"
+                    >
+                      <MessageCircle className="w-4 h-4" /> Msg to All
+                    </button>
+                    <button
+                      onClick={() => setShowBulkEmailModal(true)}
+                      disabled={allPatientsLoading || allPatients.length === 0}
+                      className="btn-outline flex items-center gap-2 !py-2.5 text-sm disabled:opacity-50"
+                    >
+                      <Mail className="w-4 h-4" /> Email to All
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -819,6 +882,144 @@ const AdminPatients = () => {
         </motion.div>
       </main>
 
+      {/* ── Bulk Message Modal ─────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {showBulkMessageModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={() => { setShowBulkMessageModal(false); setBulkMessageText(''); }}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              onClick={e => e.stopPropagation()}
+              className="bg-white rounded-2xl w-full max-w-lg shadow-xl overflow-hidden"
+            >
+              <div className="flex items-center justify-between p-5 border-b border-gray-100">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-primary-light flex items-center justify-center">
+                    <MessageCircle className="w-4 h-4 text-primary" />
+                  </div>
+                  <div>
+                    <h3 className="font-display font-bold text-text-primary">Message All Patients</h3>
+                    <p className="text-xs text-text-secondary">Recipients: {allPatients.length} patients</p>
+                  </div>
+                </div>
+                <button onClick={() => { setShowBulkMessageModal(false); setBulkMessageText(''); }} className="p-2 rounded-xl hover:bg-gray-100 text-text-secondary">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="p-5">
+                <label className="text-sm font-semibold text-text-primary mb-2 block">
+                  Message <span className="text-danger">*</span>
+                </label>
+                <textarea
+                  value={bulkMessageText}
+                  onChange={e => setBulkMessageText(e.target.value)}
+                  placeholder="Write one message to send to all listed patients..."
+                  rows={6}
+                  className="input-field resize-none text-sm"
+                  autoFocus
+                />
+                <p className="text-xs text-text-secondary mt-1.5">This sends the same in-app message to every patient currently listed in All Patients.</p>
+              </div>
+
+              <div className="flex gap-3 px-5 pb-5">
+                <button
+                  onClick={() => { setShowBulkMessageModal(false); setBulkMessageText(''); }}
+                  className="btn-outline flex-1"
+                  disabled={sendingBulkMessage}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSendBulkMessage}
+                  disabled={sendingBulkMessage || !bulkMessageText.trim()}
+                  className="btn-primary flex-1 flex items-center justify-center gap-2 disabled:opacity-60"
+                >
+                  {sendingBulkMessage ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  {sendingBulkMessage ? 'Sending...' : 'Send to All'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Bulk Email Modal ─────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {showBulkEmailModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={() => { setShowBulkEmailModal(false); setBulkEmailText(''); }}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              onClick={e => e.stopPropagation()}
+              className="bg-white rounded-2xl w-full max-w-lg shadow-xl overflow-hidden"
+            >
+              <div className="flex items-center justify-between p-5 border-b border-gray-100">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-primary-light flex items-center justify-center">
+                    <Mail className="w-4 h-4 text-primary" />
+                  </div>
+                  <div>
+                    <h3 className="font-display font-bold text-text-primary">Email All Patients</h3>
+                    <p className="text-xs text-text-secondary">Recipients: {allPatients.length} patients</p>
+                  </div>
+                </div>
+                <button onClick={() => { setShowBulkEmailModal(false); setBulkEmailText(''); }} className="p-2 rounded-xl hover:bg-gray-100 text-text-secondary">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="p-5">
+                <label className="text-sm font-semibold text-text-primary mb-2 block">
+                  Email Message <span className="text-danger">*</span>
+                </label>
+                <textarea
+                  value={bulkEmailText}
+                  onChange={e => setBulkEmailText(e.target.value)}
+                  placeholder="Write one email message to send to all listed patients..."
+                  rows={6}
+                  className="input-field resize-none text-sm"
+                  autoFocus
+                />
+                <p className="text-xs text-text-secondary mt-1.5">This sends the same styled email to every patient currently listed in All Patients.</p>
+              </div>
+
+              <div className="flex gap-3 px-5 pb-5">
+                <button
+                  onClick={() => { setShowBulkEmailModal(false); setBulkEmailText(''); }}
+                  className="btn-outline flex-1"
+                  disabled={sendingBulkEmail}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSendBulkEmail}
+                  disabled={sendingBulkEmail || !bulkEmailText.trim()}
+                  className="btn-primary flex-1 flex items-center justify-center gap-2 disabled:opacity-60"
+                >
+                  {sendingBulkEmail ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  {sendingBulkEmail ? 'Sending...' : 'Email to All'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* ── Send Email Modal ──────────────────────────────────────────────── */}
       <AnimatePresence>
         {showEmailModal && (
@@ -827,7 +1028,7 @@ const AdminPatients = () => {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-            onClick={() => { setShowEmailModal(false); setEmailDescription(''); }}
+            onClick={() => { setShowEmailModal(false); setEmailDescription(''); if (viewMode === 'all') setSelectedPatient(null); }}
           >
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }}
@@ -847,7 +1048,7 @@ const AdminPatients = () => {
                     <p className="text-xs text-text-secondary">To: {selectedPatient?.name} · {selectedPatient?.email}</p>
                   </div>
                 </div>
-                <button onClick={() => { setShowEmailModal(false); setEmailDescription(''); }} className="p-2 rounded-xl hover:bg-gray-100 text-text-secondary">
+                <button onClick={() => { setShowEmailModal(false); setEmailDescription(''); if (viewMode === 'all') setSelectedPatient(null); }} className="p-2 rounded-xl hover:bg-gray-100 text-text-secondary">
                   <X className="w-4 h-4" />
                 </button>
               </div>
@@ -878,7 +1079,7 @@ const AdminPatients = () => {
               {/* Actions */}
               <div className="flex gap-3 px-5 pb-5">
                 <button
-                  onClick={() => { setShowEmailModal(false); setEmailDescription(''); }}
+                  onClick={() => { setShowEmailModal(false); setEmailDescription(''); if (viewMode === 'all') setSelectedPatient(null); }}
                   className="btn-outline flex-1"
                   disabled={sendingEmail}
                 >

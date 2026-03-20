@@ -423,22 +423,33 @@ export const getAvailableSlots = async (req, res, next) => {
     const doctor = await User.findById(doctorId);
     if (!doctor) return res.status(404).json({ message: 'Doctor not found' });
 
-    // ✅ Parse date parts directly to avoid UTC timezone offset issues
-    // "2026-03-15" → [2026, 3, 15] → local midnight, not UTC midnight
+    // Parse date as local calendar day to avoid UTC offset drift.
     const [year, month, day] = date.split('-').map(Number);
+    if (!year || !month || !day) {
+      return res.status(400).json({ message: 'Invalid date format. Use YYYY-MM-DD' });
+    }
     const requestedDate = new Date(year, month - 1, day);
     const dayOfWeek = requestedDate.toLocaleDateString('en-US', { weekday: 'long' });
 
-    // ✅ FIX: read from availableSlots (correct field name in User model)
-    const dayAvailability = (doctor.availableSlots || []).find(a => a.day === dayOfWeek);
+    const normalizeDay = (value = '') => value.trim().toLowerCase();
+    const dayMap = {
+      mon: 'monday', tue: 'tuesday', wed: 'wednesday', thu: 'thursday',
+      fri: 'friday', sat: 'saturday', sun: 'sunday',
+    };
+    const requestedDay = normalizeDay(dayOfWeek);
+
+    const dayAvailability = (doctor.availableSlots || []).find((a) => {
+      const stored = normalizeDay(a?.day);
+      const expanded = dayMap[stored] || stored;
+      return expanded === requestedDay;
+    });
     if (!dayAvailability) {
       return res.json({ slots: [] });
     }
 
     const allSlots = generateTimeSlots(dayAvailability.startTime, dayAvailability.endTime);
 
-    const dayStart = new Date(date);
-    dayStart.setHours(0, 0, 0, 0);
+    const dayStart = new Date(year, month - 1, day, 0, 0, 0, 0);
     const dayEnd = new Date(dayStart);
     dayEnd.setDate(dayEnd.getDate() + 1);
 

@@ -2,6 +2,17 @@ import Message from '../models/Message.js';
 import User from '../models/User.js';
 import { sendEmail } from '../utils/sendEmail.js';
 
+const getFrontendBaseUrl = () => {
+  const direct = process.env.FRONTEND_URL || process.env.CLIENT_URL;
+  if (direct) return direct;
+
+  if (process.env.VERCEL_URL) {
+    return `https://${process.env.VERCEL_URL}`;
+  }
+
+  return 'http://localhost:5173';
+};
+
 // @desc    Get conversations list
 // @route   GET /api/messages/conversations
 export const getConversations = async (req, res, next) => {
@@ -207,6 +218,7 @@ export const sendEmailToPatient = async (req, res, next) => {
     const doctor = req.user;
     const doctorName = doctor.name?.startsWith('Dr.') ? doctor.name : `Dr. ${doctor.name}`;
     const now = new Date().toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    const frontendBaseUrl = getFrontendBaseUrl();
 
     const htmlContent = `
       <!DOCTYPE html>
@@ -273,7 +285,7 @@ export const sendEmailToPatient = async (req, res, next) => {
               <tr>
                 <td style="padding:0 40px 32px;text-align:center;">
                   <p style="margin:0 0 16px;color:#6b7280;font-size:13px;">If you have any questions, log in to your account to reply directly.</p>
-                  <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/patient/messages"
+                  <a href="${frontendBaseUrl}/patient/messages"
                      style="display:inline-block;background:linear-gradient(135deg,#0d6b5e,#10a88e);color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:10px;font-weight:600;font-size:14px;">
                     Open Messages →
                   </a>
@@ -302,6 +314,165 @@ export const sendEmailToPatient = async (req, res, next) => {
     });
 
     res.json({ success: true, message: `Email sent to ${patient.name}` });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Doctor/Admin sends same message to multiple patients
+// @route   POST /api/messages/bulk-message
+export const sendMessageToPatients = async (req, res, next) => {
+  try {
+    const { patientIds = [], text } = req.body;
+
+    if (!Array.isArray(patientIds) || patientIds.length === 0 || !text?.trim()) {
+      return res.status(400).json({ message: 'patientIds and message text are required' });
+    }
+
+    const uniqueIds = [...new Set(patientIds.map(String))];
+    const patients = await User.find({ _id: { $in: uniqueIds }, role: 'patient' }).select('_id name');
+    if (!patients.length) return res.status(404).json({ message: 'No valid patients found' });
+
+    const docs = patients.map((p) => ({
+      sender: req.user._id,
+      receiver: p._id,
+      text: text.trim(),
+    }));
+
+    const created = await Message.insertMany(docs);
+
+    const io = req.app.get('io');
+    if (io) {
+      const senderName = req.user.name?.startsWith('Dr.')
+        ? req.user.name
+        : req.user.role === 'doctor' || req.user.role === 'admin'
+          ? `Dr. ${req.user.name}`
+          : req.user.name;
+
+      created.forEach((msg) => {
+        io.to(`user:${msg.receiver.toString()}`).emit('message:receive', {
+          _id: msg._id.toString(),
+          sender: req.user._id.toString(),
+          receiver: msg.receiver.toString(),
+          text: msg.text,
+          senderName,
+          createdAt: msg.createdAt,
+        });
+      });
+    }
+
+    res.json({ success: true, sentCount: created.length, message: `Message sent to ${created.length} patients` });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Doctor/Admin sends same email to multiple patients
+// @route   POST /api/messages/bulk-email
+export const sendEmailToPatients = async (req, res, next) => {
+  try {
+    const { patientIds = [], description } = req.body;
+
+    if (!Array.isArray(patientIds) || patientIds.length === 0 || !description?.trim()) {
+      return res.status(400).json({ message: 'patientIds and description are required' });
+    }
+
+    const uniqueIds = [...new Set(patientIds.map(String))];
+    const patients = await User.find({ _id: { $in: uniqueIds }, role: 'patient' }).select('name email');
+    if (!patients.length) return res.status(404).json({ message: 'No valid patients found' });
+
+    const doctor = req.user;
+    const doctorName = doctor.name?.startsWith('Dr.') ? doctor.name : `Dr. ${doctor.name}`;
+    const now = new Date().toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    const frontendBaseUrl = getFrontendBaseUrl();
+
+    const tasks = patients.map((patient) => {
+      const htmlContent = `
+        <!DOCTYPE html>
+        <html>
+        <head><meta charset="UTF-8"/></head>
+        <body style="margin:0;padding:0;background:#f4f7f6;font-family:'Helvetica Neue',Arial,sans-serif;">
+          <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f7f6;padding:40px 0;">
+            <tr><td align="center">
+              <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);max-width:600px;width:100%;">
+                <tr>
+                  <td style="background:linear-gradient(135deg,#0d6b5e 0%,#10a88e 100%);padding:36px 40px;text-align:center;">
+                    <h1 style="margin:0;color:#ffffff;font-size:26px;font-weight:700;letter-spacing:-0.5px;">YourTherapist</h1>
+                    <p style="margin:8px 0 0;color:rgba(255,255,255,0.75);font-size:13px;">Professional Mental Health Care</p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:36px 40px 0;">
+                    <p style="margin:0;color:#1a1a1a;font-size:20px;font-weight:600;">Hello, ${patient.name} 👋</p>
+                    <p style="margin:8px 0 0;color:#6b7280;font-size:14px;">You have a new message from your therapist.</p>
+                  </td>
+                </tr>
+                <tr><td style="padding:24px 40px 0;"><hr style="border:none;border-top:1px solid #e5e7eb;margin:0;"/></td></tr>
+                <tr>
+                  <td style="padding:24px 40px;">
+                    <p style="margin:0 0 12px;color:#374151;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Message from ${doctorName}</p>
+                    <div style="background:#f0fdf8;border-left:4px solid #0d6b5e;border-radius:0 8px 8px 0;padding:20px 24px;">
+                      <p style="margin:0;color:#1a1a1a;font-size:15px;line-height:1.7;white-space:pre-wrap;">${description.trim()}</p>
+                    </div>
+                  </td>
+                </tr>
+                <tr><td style="padding:0 40px;"><hr style="border:none;border-top:1px solid #e5e7eb;margin:0;"/></td></tr>
+                <tr>
+                  <td style="padding:24px 40px;">
+                    <table width="100%" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="background:#f9fafb;border-radius:10px;padding:16px 20px;">
+                          <p style="margin:0 0 4px;color:#6b7280;font-size:12px;">Your Therapist</p>
+                          <p style="margin:0;color:#1a1a1a;font-size:14px;font-weight:600;">${doctorName}</p>
+                          ${doctor.specialization ? `<p style="margin:4px 0 0;color:#0d6b5e;font-size:12px;">${doctor.specialization}</p>` : ''}
+                        </td>
+                        <td width="20"></td>
+                        <td style="background:#f9fafb;border-radius:10px;padding:16px 20px;">
+                          <p style="margin:0 0 4px;color:#6b7280;font-size:12px;">Date Sent</p>
+                          <p style="margin:0;color:#1a1a1a;font-size:14px;font-weight:600;">${now}</p>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:0 40px 32px;text-align:center;">
+                    <p style="margin:0 0 16px;color:#6b7280;font-size:13px;">If you have any questions, log in to your account to reply directly.</p>
+                    <a href="${frontendBaseUrl}/patient/messages"
+                       style="display:inline-block;background:linear-gradient(135deg,#0d6b5e,#10a88e);color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:10px;font-weight:600;font-size:14px;">
+                      Open Messages →
+                    </a>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="background:#f9fafb;padding:20px 40px;text-align:center;border-top:1px solid #e5e7eb;">
+                    <p style="margin:0;color:#9ca3af;font-size:12px;">© ${new Date().getFullYear()} YourTherapist · This email was sent by your registered therapist.</p>
+                    <p style="margin:6px 0 0;color:#9ca3af;font-size:11px;">Please do not reply to this automated email. Use the Messages section in your dashboard.</p>
+                  </td>
+                </tr>
+              </table>
+            </td></tr>
+          </table>
+        </body>
+        </html>
+      `;
+
+      return sendEmail({
+        to: patient.email,
+        subject: `📩 Message from ${doctorName} — YourTherapist`,
+        htmlContent,
+      });
+    });
+
+    const results = await Promise.allSettled(tasks);
+    const sentCount = results.filter((r) => r.status === 'fulfilled').length;
+
+    res.json({
+      success: true,
+      sentCount,
+      failedCount: results.length - sentCount,
+      message: `Email sent to ${sentCount} of ${results.length} patients`,
+    });
   } catch (error) {
     next(error);
   }

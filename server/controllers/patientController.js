@@ -152,21 +152,31 @@ export const getAllPatientsOnSite = async (req, res, next) => {
 // @route   GET /api/patients/analytics
 export const getAnalytics = async (req, res, next) => {
   try {
-    const doctorId = req.user._id;
+    // For doctors: always show their own data
+    // For admins: optionally allow selecting a doctor with query param
+    let doctorId = req.user._id;
+    
+    if (req.user.role === 'admin' && req.query.doctorId) {
+      doctorId = req.query.doctorId;
+    }
 
-    const totalPatients = await Appointment.distinct('patient', {
+    const totalPatientIds = await Appointment.distinct('patient', {
       doctor: doctorId,
       paymentStatus: 'paid',
-      status: { $nin: ['cancelled'] }
+      status: { $nin: ['cancelled', 'no-show'] }
+    });
+    const totalPatients = await User.countDocuments({
+      _id: { $in: totalPatientIds },
+      role: 'patient',
     });
     const totalSessions = await Appointment.countDocuments({
       doctor: doctorId,
       paymentStatus: 'paid',
-      status: { $nin: ['cancelled'] }
+      status: { $nin: ['cancelled', 'no-show'] }
     });
 
     const totalRev = await Appointment.aggregate([
-      { $match: { doctor: doctorId, paymentStatus: 'paid' } },
+      { $match: { doctor: doctorId, paymentStatus: 'paid', status: { $nin: ['cancelled', 'no-show'] } } },
       { $group: { _id: null, total: { $sum: '$fee' } } }
     ]);
 
@@ -179,6 +189,7 @@ export const getAnalytics = async (req, res, next) => {
         $match: {
           doctor: doctorId,
           paymentStatus: 'paid',
+          status: { $nin: ['cancelled', 'no-show'] },
           $or: [
             { status: 'completed' },
             { date: { $lt: todayUTC } }
@@ -193,7 +204,7 @@ export const getAnalytics = async (req, res, next) => {
         $match: {
           doctor: doctorId,
           paymentStatus: 'paid',
-          status: { $nin: ['completed', 'cancelled'] },
+          status: { $nin: ['completed', 'cancelled', 'no-show'] },
           date: { $gte: todayUTC }
         }
       },
@@ -210,6 +221,7 @@ export const getAnalytics = async (req, res, next) => {
         $match: {
           doctor: doctorId,
           paymentStatus: 'paid',
+          status: { $nin: ['cancelled', 'no-show'] },
           date: { $gte: todayStart, $lt: todayEnd },
           $or: [
             { status: 'completed' },
@@ -229,7 +241,7 @@ export const getAnalytics = async (req, res, next) => {
             { date: { $gte: todayStart, $lt: todayEnd } },
             { date: { $gte: todayUTC } }
           ],
-          status: { $nin: ['completed', 'cancelled'] }
+          status: { $nin: ['completed', 'cancelled', 'no-show'] }
         }
       },
       { $group: { _id: null, total: { $sum: '$fee' } } }
@@ -240,6 +252,7 @@ export const getAnalytics = async (req, res, next) => {
         $match: {
           doctor: doctorId,
           paymentStatus: 'paid',
+          status: { $nin: ['cancelled', 'no-show'] },
           date: { $gte: todayStart, $lt: todayEnd }
         }
       },
@@ -249,7 +262,7 @@ export const getAnalytics = async (req, res, next) => {
     const completedSessionsCount = await Appointment.countDocuments({
       doctor: doctorId,
       paymentStatus: 'paid',
-      status: { $nin: ['cancelled'] },
+      status: { $nin: ['cancelled', 'no-show'] },
       $or: [
         { status: 'completed' },
         { date: { $lt: todayEnd } }
@@ -259,7 +272,7 @@ export const getAnalytics = async (req, res, next) => {
     const upcomingSessionsCount = await Appointment.countDocuments({
       doctor: doctorId,
       paymentStatus: 'paid',
-      status: { $nin: ['completed', 'cancelled'] },
+      status: { $nin: ['completed', 'cancelled', 'no-show'] },
       date: { $gte: todayEnd }
     });
 
@@ -272,11 +285,11 @@ export const getAnalytics = async (req, res, next) => {
       nD.setUTCDate(nD.getUTCDate() + 1);
 
       const dayRev = await Appointment.aggregate([
-        { $match: { doctor: doctorId, paymentStatus: 'paid', date: { $gte: d, $lt: nD } } },
+        { $match: { doctor: doctorId, paymentStatus: 'paid', status: { $nin: ['cancelled', 'no-show'] }, date: { $gte: d, $lt: nD } } },
         { $group: { _id: null, total: { $sum: '$fee' } } }
       ]);
       const dayOrders = await Appointment.countDocuments({
-        doctor: doctorId, paymentStatus: 'paid', status: { $nin: ['cancelled'] }, date: { $gte: d, $lt: nD }
+        doctor: doctorId, paymentStatus: 'paid', status: { $nin: ['cancelled', 'no-show'] }, date: { $gte: d, $lt: nD }
       });
 
       dailyData.push({
@@ -295,32 +308,36 @@ export const getAnalytics = async (req, res, next) => {
       const sessions = await Appointment.countDocuments({
         doctor: doctorId,
         paymentStatus: 'paid',
-        status: { $nin: ['cancelled'] },
+        status: { $nin: ['cancelled', 'no-show'] },
         date: { $gte: startM, $lt: endM },
       });
 
       const revenueMonth = await Appointment.aggregate([
-        { $match: { doctor: doctorId, paymentStatus: 'paid', date: { $gte: startM, $lt: endM } } },
+        { $match: { doctor: doctorId, paymentStatus: 'paid', status: { $nin: ['cancelled', 'no-show'] }, date: { $gte: startM, $lt: endM } } },
         { $group: { _id: null, total: { $sum: '$fee' } } }
       ]);
 
-      const patientsMonth = await Appointment.distinct('patient', {
+      const patientsMonthIds = await Appointment.distinct('patient', {
         doctor: doctorId,
         paymentStatus: 'paid',
-        status: { $nin: ['cancelled'] },
+        status: { $nin: ['cancelled', 'no-show'] },
         date: { $gte: startM, $lt: endM },
+      });
+      const patientsMonth = await User.countDocuments({
+        _id: { $in: patientsMonthIds },
+        role: 'patient',
       });
 
       monthlyData.push({
         month: startM.toLocaleDateString('en', { month: 'short' }),
         sessions,
         revenue: revenueMonth[0]?.total || 0,
-        patients: patientsMonth.length,
+        patients: patientsMonth,
       });
     }
 
     res.json({
-      totalPatients: totalPatients.length,
+      totalPatients,
       totalSessions,
       totalRevenue: totalRev[0]?.total || 0,
       completedRevenue: completedRevenueData[0]?.total || 0,

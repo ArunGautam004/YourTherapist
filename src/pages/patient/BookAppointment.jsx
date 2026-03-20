@@ -10,6 +10,13 @@ import PatientSidebar from './Sidebar';
 import { useAuth } from '../../context/AuthContext';
 import { appointmentAPI, doctorAPI, messageAPI } from '../../services/api';
 
+const toLocalDateYMD = (d) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
 const BookAppointment = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -62,8 +69,8 @@ const BookAppointment = () => {
         const { data } = await doctorAPI.getAll();
         setDoctors(data.doctors || []);
         if (data.doctors?.length > 0) {
-          setSelectedDoctor(data.doctors);
-          setDoctorInfo(data.doctors);
+          setSelectedDoctor(data.doctors[0]);
+          setDoctorInfo(data.doctors[0]);
         }
       } catch (err) {
         toast.error('Failed to load doctors');
@@ -80,7 +87,7 @@ const BookAppointment = () => {
       setLoading(true);
       setSelectedTime(null);
       try {
-        const dateStr = selectedDate.toISOString().split('T');
+        const dateStr = toLocalDateYMD(selectedDate);
         const { data } = await appointmentAPI.getSlots(selectedDoctor._id, dateStr);
         const slots = data.slots || [];
         setAvailableSlots(slots);
@@ -114,7 +121,7 @@ const BookAppointment = () => {
     try {
       const { data } = await appointmentAPI.create({
         doctorId: selectedDoctor._id,
-        date: selectedDate.toISOString().split('T'),
+        date: toLocalDateYMD(selectedDate),
         time: selectedTime,
         type: 'video',
       });
@@ -260,7 +267,7 @@ const BookAppointment = () => {
                 {dates.map((date) => {
                   const isSelected = selectedDate?.toDateString() === date.toDateString();
                   const isTodayDate = date.toDateString() === now.toDateString();
-                  const dateKey = date.toISOString().split('T');
+                  const dateKey = toLocalDateYMD(date);
                   const hasSlots = dayAvailability[dateKey] === true;
                   const notAvail = dayAvailability.hasOwnProperty(dateKey) && !dayAvailability[dateKey];
                   return (

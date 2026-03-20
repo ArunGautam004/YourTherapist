@@ -102,6 +102,12 @@ const VideoSession = () => {
     appointmentRef.current = appointment;
   }, [appointment]);
 
+  // Always signal on canonical meeting UUID room if appointment is loaded.
+  // This prevents doctor/patient ending up in different socket rooms when one opens /session/<appointmentId>.
+  const signalRoomId = appointment?.meetingLink?.startsWith('/session/')
+    ? appointment.meetingLink.replace('/session/', '')
+    : roomId;
+
   // Auto-save session notes when description changes (doctor only)
   useEffect(() => {
     const isDoc = user?.role === 'doctor' || user?.role === 'admin';
@@ -250,6 +256,7 @@ const VideoSession = () => {
   // ─── Main WebRTC + Socket Logic ──────────────────────────────────────────
   useEffect(() => {
     if (!sessionActive) return;
+    if (!signalRoomId) return;
 
     const socket = getSocket();
     if (!socket) {
@@ -276,7 +283,7 @@ const VideoSession = () => {
 
     pc.onicecandidate = (event) => {
       if (event.candidate) {
-        socket.emit('call:ice-candidate', { roomId, candidate: event.candidate });
+        socket.emit('call:ice-candidate', { roomId: signalRoomId, candidate: event.candidate });
       }
     };
 
@@ -301,7 +308,7 @@ const VideoSession = () => {
         try {
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
-          socket.emit('call:offer', { roomId, offer });
+          socket.emit('call:offer', { roomId: signalRoomId, offer });
         } catch (err) {
           console.error('[WebRTC] Error creating offer:', err);
         }
@@ -325,7 +332,7 @@ const VideoSession = () => {
         pendingCandidates.current = [];
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        socket.emit('call:answer', { roomId, answer });
+        socket.emit('call:answer', { roomId: signalRoomId, answer });
       } catch (err) {
         console.error('[WebRTC] Error handling offer:', err);
       }
@@ -357,11 +364,17 @@ const VideoSession = () => {
     };
 
     const handleCallEnded = ({ participant } = {}) => {
-      const name = participant?.name || remoteParticipant?.name || 'The other person';
+      const name = participant?.name || 'The other person';
       toast(`${name} left the session.`, { icon: 'ℹ️' });
       setIsRemoteVideoActive(false);
       setIsRemoteConnected(false);
       if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
+    };
+
+    const handleAccessDenied = ({ reason }) => {
+      toast.error(reason || 'Session is not active right now.');
+      setSessionActive(false);
+      setIsInWaitingRoom(true);
     };
 
     const handleRoomMessage = (msg) => {
@@ -399,13 +412,14 @@ const VideoSession = () => {
     socket.on('call:answer', handleCallAnswer);
     socket.on('call:ice-candidate', handleIceCandidate);
     socket.on('call:ended', handleCallEnded);
+    socket.on('call:access-denied', handleAccessDenied);
     socket.on('room:message', handleRoomMessage);
     socket.on('questionnaire:receive', handleQuestionnaireReceive);
     socket.on('questionnaire:response', handleQuestionnaireResponse);
 
     const userName = user?.name || user?.fullName || (user?.role === 'doctor' ? 'Doctor' : 'Patient');
     socket.emit('call:join-room', {
-      roomId,
+      roomId: signalRoomId,
       role: user?.role,
       userId: user?._id || user?.id,
       name: userName,
@@ -418,13 +432,14 @@ const VideoSession = () => {
       socket.off('call:answer', handleCallAnswer);
       socket.off('call:ice-candidate', handleIceCandidate);
       socket.off('call:ended', handleCallEnded);
+      socket.off('call:access-denied', handleAccessDenied);
       socket.off('room:message', handleRoomMessage);
       socket.off('questionnaire:receive', handleQuestionnaireReceive);
       socket.off('questionnaire:response', handleQuestionnaireResponse);
-      socket.emit('call:end', { roomId });
+      socket.emit('call:end', { roomId: signalRoomId });
       pc.close();
     };
-  }, [sessionActive, roomId, user]);
+  }, [sessionActive, signalRoomId, user]);
 
   // ─── Handlers ────────────────────────────────────────────────────────────
 
@@ -436,7 +451,7 @@ const VideoSession = () => {
   const handleEndCall = async () => {
     const isDoc = user?.role === 'doctor' || user?.role === 'admin';
     const socket = getSocket();
-    if (socket) socket.emit('call:end', { roomId });
+    if (socket) socket.emit('call:end', { roomId: signalRoomId });
     localStream.current?.getTracks().forEach(t => t.stop());
     navigate(isDoc ? '/admin/dashboard' : '/patient/dashboard');
   };
@@ -461,7 +476,7 @@ const VideoSession = () => {
     setChatMessage('');
 
     const socket = getSocket();
-    if (socket) socket.emit('room:message', { roomId, message: msg });
+    if (socket) socket.emit('room:message', { roomId: signalRoomId, message: msg });
   };
 
   const handleSendQuestionnaire = () => {
@@ -472,7 +487,7 @@ const VideoSession = () => {
     const socket = getSocket();
     if (socket) {
       socket.emit('questionnaire:push', {
-        roomId,
+        roomId: signalRoomId,
         questionnaire: {
           templateId: selectedTemplate._id,
           questions: selectedTemplate.questions,
@@ -487,7 +502,7 @@ const VideoSession = () => {
   const handleSubmitQuestionnaire = async () => {
     setQuestionnaireSubmitted(true);
     const socket = getSocket();
-    if (socket) socket.emit('questionnaire:submit', { roomId, responses: answers });
+    if (socket) socket.emit('questionnaire:submit', { roomId: signalRoomId, responses: answers });
 
     try {
       const isPatient = user?.role !== 'doctor' && user?.role !== 'admin';

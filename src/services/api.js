@@ -75,6 +75,8 @@ export const messageAPI = {
   send:                (data)           => api.post('/messages', data),
   markAsRead:          (senderId)       => api.put(`/messages/read/${senderId}`),
   sendEmailToPatient:  (data)           => api.post('/messages/email-patient', data),
+  sendBulkMessage:     (data)           => api.post('/messages/bulk-message', data),
+  sendBulkEmail:       (data)           => api.post('/messages/bulk-email', data),
 };
 
 export const sessionAPI = {

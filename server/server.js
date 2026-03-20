@@ -17,7 +17,6 @@ import moodRoutes from './routes/mood.js';
 import messageRoutes from './routes/messages.js';
 import sessionRoutes from './routes/sessions.js';
 import uploadRoutes from './routes/upload.js';
-import { startReminderJob } from './utils/reminderJob.js';
 import notificationRoutes from './routes/notificationRoutes.js';
 import { startReminderScheduler } from './utils/reminderScheduler.js';
 
@@ -79,5 +78,5 @@ httpServer.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📡 Socket.io ready`);
   console.log(`🌐 CORS: ${process.env.CLIENT_URL || 'http://localhost:5173'}`);
-  startReminderJob();
+  // Reminders are handled by startReminderScheduler(io) above.
 });
