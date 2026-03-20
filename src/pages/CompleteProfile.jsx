@@ -113,7 +113,7 @@ const CompleteProfile = () => {
                                 <div className="flex-1 space-y-2">
                                     <div className="flex gap-2">
                                         <input
-                                            type="url"
+                                            type="text"
                                             value={form.profilePic}
                                             onChange={(e) => setForm({ ...form, profilePic: e.target.value })}
                                             placeholder="https://example.com/your-photo.jpg"

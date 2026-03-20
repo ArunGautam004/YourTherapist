@@ -1,12 +1,12 @@
+// src/pages/patient/BookAppointment.jsx
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import {
-  LayoutDashboard, Calendar, BookOpen, MessageCircle, Settings,
   Video, Clock, Check, Loader2, CreditCard, Star, User as UserIcon
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import Sidebar from '../../components/layout/Sidebar';
+import PatientSidebar from './Sidebar';
 import { useAuth } from '../../context/AuthContext';
 import { appointmentAPI, doctorAPI, messageAPI } from '../../services/api';
 
@@ -16,16 +16,6 @@ const BookAppointment = () => {
   const [step, setStep] = useState(1);
   const [totalUnread, setTotalUnread] = useState(0);
 
-  // Consistent sidebar — live unread badge
-  const patientLinks = [
-    { name: 'Dashboard',        path: '/patient/dashboard', icon: LayoutDashboard },
-    { name: 'My Sessions',      path: '/patient/sessions',  icon: Clock },
-    { name: 'Book Appointment', path: '/patient/book',      icon: Calendar },
-    { name: 'Mood Journal',     path: '/patient/journal',   icon: BookOpen },
-    { name: 'Messages',         path: '/patient/messages',  icon: MessageCircle, badge: totalUnread > 0 ? String(totalUnread) : null },
-    { name: 'Settings',         path: '/patient/settings',  icon: Settings },
-  ];
-
   useEffect(() => {
     messageAPI.getConversations()
       .then(({ data }) => {
@@ -33,6 +23,7 @@ const BookAppointment = () => {
         setTotalUnread(u);
       }).catch(() => {});
   }, []);
+  
   const [selectedDate, setSelectedDate] = useState(null);
   const [selectedTime, setSelectedTime] = useState(null);
   const [availableSlots, setAvailableSlots] = useState([]);
@@ -43,11 +34,9 @@ const BookAppointment = () => {
   const [booking, setBooking] = useState(false);
   const [loadingDoctors, setLoadingDoctors] = useState(true);
   const [bookingSuccess, setBookingSuccess] = useState(false);
-  const [dayAvailability, setDayAvailability] = useState({}); // date string -> bool
+  const [dayAvailability, setDayAvailability] = useState({});
   const [bookedAppointment, setBookedAppointment] = useState(null);
 
-  // Generate next 14 days starting from today
-  // Don't exclude any day — doctor availability handles which days are bookable
   const now = new Date();
   const dates = Array.from({ length: 14 }, (_, i) => {
     const d = new Date();
@@ -55,7 +44,6 @@ const BookAppointment = () => {
     return d;
   });
 
-  // Helper: check if a time slot has already passed for today
   const isSlotPassed = (slotTime) => {
     if (!slotTime) return false;
     if (!selectedDate || selectedDate.toDateString() !== now.toDateString()) return false;
@@ -68,18 +56,16 @@ const BookAppointment = () => {
     return h * 60 + (m || 0) <= now.getHours() * 60 + now.getMinutes();
   };
 
-  // Fetch doctors
   useEffect(() => {
     const fetchDoctors = async () => {
       try {
         const { data } = await doctorAPI.getAll();
         setDoctors(data.doctors || []);
         if (data.doctors?.length > 0) {
-          setSelectedDoctor(data.doctors[0]);
-          setDoctorInfo(data.doctors[0]);
+          setSelectedDoctor(data.doctors);
+          setDoctorInfo(data.doctors);
         }
       } catch (err) {
-        console.error('Failed to fetch doctors:', err);
         toast.error('Failed to load doctors');
       } finally {
         setLoadingDoctors(false);
@@ -88,22 +74,19 @@ const BookAppointment = () => {
     fetchDoctors();
   }, []);
 
-  // Fetch available slots when date + doctor change
   useEffect(() => {
     if (!selectedDate || !selectedDoctor) return;
     const fetchSlots = async () => {
       setLoading(true);
       setSelectedTime(null);
       try {
-        const dateStr = selectedDate.toISOString().split('T')[0];
+        const dateStr = selectedDate.toISOString().split('T');
         const { data } = await appointmentAPI.getSlots(selectedDoctor._id, dateStr);
         const slots = data.slots || [];
         setAvailableSlots(slots);
         if (data.doctor) setDoctorInfo(data.doctor);
-        // Track availability per date for UI indicators
         setDayAvailability(prev => ({ ...prev, [dateStr]: slots.length > 0 }));
       } catch (err) {
-        console.error(err);
         setAvailableSlots([]);
       } finally {
         setLoading(false);
@@ -112,7 +95,6 @@ const BookAppointment = () => {
     fetchSlots();
   }, [selectedDate, selectedDoctor]);
 
-  // Load Razorpay script
   const loadRazorpayScript = () => {
     return new Promise((resolve) => {
       if (document.getElementById('razorpay-script')) return resolve(true);
@@ -130,23 +112,20 @@ const BookAppointment = () => {
     setBooking(true);
 
     try {
-      // Step 1: Create appointment + Razorpay order
       const { data } = await appointmentAPI.create({
         doctorId: selectedDoctor._id,
-        date: selectedDate.toISOString().split('T')[0],
+        date: selectedDate.toISOString().split('T'),
         time: selectedTime,
         type: 'video',
       });
 
-      // Step 2: Load Razorpay
       const loaded = await loadRazorpayScript();
       if (!loaded) {
-        toast.error('Razorpay failed to load. Check your internet connection.');
+        toast.error('Razorpay failed to load.');
         setBooking(false);
         return;
       }
 
-      // Step 3: Open Razorpay modal
       const options = {
         key: data.razorpayKeyId,
         amount: data.razorpayOrder.amount,
@@ -155,7 +134,6 @@ const BookAppointment = () => {
         description: `Video Session with Dr. ${doctorInfo?.name || 'Therapist'}`,
         order_id: data.razorpayOrder.id,
         handler: async (response) => {
-          // Step 4: Verify payment
           try {
             const verifyRes = await appointmentAPI.verifyPayment({
               razorpay_order_id: response.razorpay_order_id,
@@ -165,10 +143,10 @@ const BookAppointment = () => {
             });
             setBookedAppointment(verifyRes.data.appointment);
             setBookingSuccess(true);
-            setStep(4); // Success step
+            setStep(4);
             toast.success('Payment successful! Appointment confirmed! 🎉');
           } catch (err) {
-            toast.error('Payment verification failed. Contact support.');
+            toast.error('Payment verification failed.');
           }
           setBooking(false);
         },
@@ -198,7 +176,7 @@ const BookAppointment = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      <Sidebar links={patientLinks} userRole="patient" />
+      <PatientSidebar unreadMessages={totalUnread} />
 
       <main className="lg:ml-[260px] pt-20 lg:pt-6 p-4 md:p-6 lg:p-8">
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="max-w-3xl mx-auto">
@@ -207,7 +185,6 @@ const BookAppointment = () => {
           </h1>
           <p className="text-text-secondary mb-8">Schedule a session with your therapist</p>
 
-          {/* Progress Steps */}
           <div className="flex items-center justify-center gap-3 mb-8">
             {['Doctor', 'Date & Time', bookingSuccess ? 'Confirmed' : 'Payment'].map((label, i) => (
               <div key={label} className="flex items-center gap-2">
@@ -225,7 +202,6 @@ const BookAppointment = () => {
             ))}
           </div>
 
-          {/* Step 1: Select Doctor */}
           {step === 1 && (
             <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="card">
               <h2 className="font-display font-bold text-lg text-text-primary mb-5">Select Your Therapist</h2>
@@ -277,7 +253,6 @@ const BookAppointment = () => {
             </motion.div>
           )}
 
-          {/* Step 2: Date & Time */}
           {step === 2 && (
             <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="card">
               <h2 className="font-display font-bold text-lg text-text-primary mb-5">Select Date</h2>
@@ -285,7 +260,7 @@ const BookAppointment = () => {
                 {dates.map((date) => {
                   const isSelected = selectedDate?.toDateString() === date.toDateString();
                   const isTodayDate = date.toDateString() === now.toDateString();
-                  const dateKey = date.toISOString().split('T')[0];
+                  const dateKey = date.toISOString().split('T');
                   const hasSlots = dayAvailability[dateKey] === true;
                   const notAvail = dayAvailability.hasOwnProperty(dateKey) && !dayAvailability[dateKey];
                   return (
@@ -335,7 +310,6 @@ const BookAppointment = () => {
                       {availableSlots
                         .filter((slot) => !isSlotPassed(typeof slot === 'string' ? slot : slot.time))
                         .map((slot) => {
-                          // Backend returns plain strings e.g. "10:00 AM"
                           const timeStr = typeof slot === 'string' ? slot : slot.time;
                           return (
                             <button
@@ -357,8 +331,7 @@ const BookAppointment = () => {
                       <Clock className="w-10 h-10 text-gray-300 mx-auto mb-3" />
                       <p className="text-sm font-semibold text-text-primary">Not Available</p>
                       <p className="text-xs text-text-secondary mt-1">
-                        No slots on {selectedDate.toLocaleDateString('en', { weekday: 'long', month: 'long', day: 'numeric' })}.
-                        Try another date.
+                        No slots on {selectedDate.toLocaleDateString('en', { weekday: 'long', month: 'long', day: 'numeric' })}. Try another date.
                       </p>
                     </div>
                   )}
@@ -378,12 +351,9 @@ const BookAppointment = () => {
             </motion.div>
           )}
 
-          {/* Step 3: Confirm & Pay */}
           {step === 3 && (
             <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="card">
               <h2 className="font-display font-bold text-lg text-text-primary mb-5">Confirm & Pay</h2>
-
-              {/* Session Type Badge */}
               <div className="flex items-center gap-3 p-4 rounded-2xl border-2 border-primary bg-primary-light mb-6">
                 <Video className={`w-8 h-8 text-primary`} />
                 <div>
@@ -393,7 +363,6 @@ const BookAppointment = () => {
                 <p className="text-lg font-bold text-primary ml-auto">₹{fee}</p>
               </div>
 
-              {/* Booking Summary */}
               <div className="bg-gray-50 rounded-2xl p-5 mb-6">
                 <h3 className="font-semibold text-text-primary text-sm mb-3">Booking Summary</h3>
                 <div className="space-y-2 text-sm">
@@ -429,20 +398,12 @@ const BookAppointment = () => {
                   disabled={booking}
                   className="btn-primary flex-1 flex items-center justify-center gap-2 disabled:opacity-60"
                 >
-                  {booking ? (
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                  ) : (
-                    <>
-                      <CreditCard className="w-5 h-5" />
-                      <span>Pay ₹{fee}</span>
-                    </>
-                  )}
+                  {booking ? <Loader2 className="w-5 h-5 animate-spin" /> : <><CreditCard className="w-5 h-5" /><span>Pay ₹{fee}</span></>}
                 </button>
               </div>
             </motion.div>
           )}
 
-          {/* Step 4 (mapped to 4): Success */}
           {step === 4 && bookingSuccess && (
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="card text-center">
               <div className="w-20 h-20 rounded-full bg-success/10 flex items-center justify-center mx-auto mb-5">

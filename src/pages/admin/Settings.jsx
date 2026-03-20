@@ -2,8 +2,9 @@ import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
     LayoutDashboard, Users, Calendar, BarChart3, MessageCircle, Settings,
-    Save, Loader2, Camera, Mail,
-    Shield, Key, Briefcase, Clock, Upload, ClipboardList, User
+    Save, Loader2, Camera,
+    Shield, Key, Briefcase, Clock, Upload, ClipboardList, User,
+    Eye, EyeOff, Lock
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Sidebar from '../../components/layout/Sidebar';
@@ -17,6 +18,14 @@ const AdminSettings = () => {
     const fileInputRef = useRef(null);
     const [activeTab, setActiveTab] = useState('profile');
     const [totalUnread, setTotalUnread] = useState(0);
+
+    const [passwordForm, setPasswordForm] = useState({
+        currentPassword: '', newPassword: '', confirmPassword: '',
+    });
+    const [changingPassword, setChangingPassword] = useState(false);
+    const [showCurrentPwd, setShowCurrentPwd] = useState(false);
+    const [showNewPwd, setShowNewPwd] = useState(false);
+    const [showConfirmPwd, setShowConfirmPwd] = useState(false);
 
     const dynamicLinks = [
         { name: 'Dashboard', path: '/admin/dashboard', icon: LayoutDashboard },
@@ -38,7 +47,6 @@ const AdminSettings = () => {
         experience: 0,
         bio: '',
         consultationFee: 1500,
-        chatFee: 800,
     });
 
     useEffect(() => {
@@ -53,7 +61,6 @@ const AdminSettings = () => {
                 experience: user.experience || 0,
                 bio: user.bio || '',
                 consultationFee: user.consultationFee || 1500,
-                chatFee: user.chatFee || 800,
             });
         }
         messageAPI.getConversations().then(({ data }) => {
@@ -88,7 +95,12 @@ const AdminSettings = () => {
         try {
             const { data } = await uploadAPI.uploadImage(formData);
             setForm(prev => ({ ...prev, profilePic: data.url }));
-            toast.success('Image uploaded successfully');
+            // Auto-save to DB so the picture persists immediately
+            try {
+                const { data: profileData } = await authAPI.updateProfile({ profilePic: data.url });
+                updateUser(profileData.user);
+            } catch {}
+            toast.success('Image uploaded & saved!');
         } catch (err) {
             toast.error('Failed to upload image. Try pasting a URL instead.');
         } finally {
@@ -97,7 +109,29 @@ const AdminSettings = () => {
         }
     };
 
-    // ── Tabs: availability removed — managed in Calendar page ─────────────
+    const handleChangePassword = async () => {
+        const { currentPassword, newPassword, confirmPassword } = passwordForm;
+        if (!currentPassword || !newPassword || !confirmPassword) {
+            toast.error('Please fill in all fields'); return;
+        }
+        if (newPassword.length < 6) {
+            toast.error('New password must be at least 6 characters'); return;
+        }
+        if (newPassword !== confirmPassword) {
+            toast.error('New passwords do not match'); return;
+        }
+        setChangingPassword(true);
+        try {
+            const { data } = await authAPI.changePassword({ currentPassword, newPassword });
+            toast.success(data.message || 'Password changed successfully!');
+            setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+        } catch (err) {
+            toast.error(err.response?.data?.message || 'Failed to change password');
+        } finally {
+            setChangingPassword(false);
+        }
+    };
+
     const tabs = [
         { id: 'profile',  label: 'Profile',  icon: User },
         { id: 'practice', label: 'Practice', icon: Briefcase },
@@ -115,7 +149,6 @@ const AdminSettings = () => {
                     </h1>
                     <p className="text-text-secondary mb-8">Manage your profile and practice settings</p>
 
-                    {/* Tabs */}
                     <div className="flex gap-2 mb-8 flex-wrap">
                         {tabs.map((tab) => (
                             <button
@@ -132,7 +165,6 @@ const AdminSettings = () => {
                         ))}
                     </div>
 
-                    {/* Profile Tab */}
                     {activeTab === 'profile' && (
                         <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-6">
                             <div className="card">
@@ -200,7 +232,6 @@ const AdminSettings = () => {
                         </motion.div>
                     )}
 
-                    {/* Practice Tab */}
                     {activeTab === 'practice' && (
                         <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-6">
                             <div className="card">
@@ -222,10 +253,6 @@ const AdminSettings = () => {
                                         <label className="text-sm font-medium text-text-secondary mb-1.5 block">Consultation Fee (₹)</label>
                                         <input type="number" value={form.consultationFee} onChange={(e) => setForm({ ...form, consultationFee: Number(e.target.value) })} min="0" className="input-field" />
                                     </div>
-                                    <div>
-                                        <label className="text-sm font-medium text-text-secondary mb-1.5 block">Chat Fee (₹)</label>
-                                        <input type="number" value={form.chatFee} onChange={(e) => setForm({ ...form, chatFee: Number(e.target.value) })} min="0" className="input-field" />
-                                    </div>
                                     <div className="md:col-span-2">
                                         <label className="text-sm font-medium text-text-secondary mb-1.5 block">Bio</label>
                                         <textarea value={form.bio} onChange={(e) => setForm({ ...form, bio: e.target.value })} placeholder="Tell patients about yourself..." rows={4} className="input-field resize-none" />
@@ -237,7 +264,6 @@ const AdminSettings = () => {
                                 </button>
                             </div>
 
-                            {/* Redirect hint */}
                             <div className="flex items-start gap-3 p-4 rounded-2xl bg-primary-light/50 border border-primary/20">
                                 <Clock className="w-5 h-5 text-primary mt-0.5 flex-shrink-0" />
                                 <div>
@@ -251,27 +277,71 @@ const AdminSettings = () => {
                         </motion.div>
                     )}
 
-                    {/* Security Tab */}
                     {activeTab === 'security' && (
                         <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="card">
-                            <h3 className="font-display font-bold text-lg text-text-primary mb-5 flex items-center gap-2">
-                                <Key className="w-5 h-5 text-primary" />
-                                Change Password
+                            <h3 className="font-display font-bold text-lg text-text-primary mb-6 flex items-center gap-2">
+                                <Lock className="w-5 h-5 text-primary" /> Change Password
                             </h3>
-                            <p className="text-sm text-text-secondary mb-6">
-                                To change your password, use the "Forgot Password" flow to receive an OTP on your email.
-                            </p>
-                            <div className="bg-primary-light/50 border border-primary/20 rounded-2xl p-4 flex items-start gap-3">
-                                <Mail className="w-5 h-5 text-primary mt-0.5 flex-shrink-0" />
+                            <div className="space-y-4 max-w-md">
                                 <div>
-                                    <p className="text-sm font-medium text-text-primary">Your registered email</p>
-                                    <p className="text-sm text-text-secondary">{user?.email}</p>
+                                    <label className="text-sm font-medium text-text-secondary mb-1.5 block">Current Password</label>
+                                    <div className="relative">
+                                        <input
+                                            type={showCurrentPwd ? 'text' : 'password'}
+                                            value={passwordForm.currentPassword}
+                                            onChange={e => setPasswordForm({ ...passwordForm, currentPassword: e.target.value })}
+                                            placeholder="Enter current password"
+                                            className="input-field !pr-10"
+                                        />
+                                        <button type="button" onClick={() => setShowCurrentPwd(!showCurrentPwd)} className="absolute right-3 top-1/2 -translate-y-1/2 text-text-secondary hover:text-text-primary transition-colors">
+                                            {showCurrentPwd ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                        </button>
+                                    </div>
                                 </div>
+                                <div>
+                                    <label className="text-sm font-medium text-text-secondary mb-1.5 block">New Password</label>
+                                    <div className="relative">
+                                        <input
+                                            type={showNewPwd ? 'text' : 'password'}
+                                            value={passwordForm.newPassword}
+                                            onChange={e => setPasswordForm({ ...passwordForm, newPassword: e.target.value })}
+                                            placeholder="Enter new password (min 6 characters)"
+                                            className="input-field !pr-10"
+                                        />
+                                        <button type="button" onClick={() => setShowNewPwd(!showNewPwd)} className="absolute right-3 top-1/2 -translate-y-1/2 text-text-secondary hover:text-text-primary transition-colors">
+                                            {showNewPwd ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                        </button>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="text-sm font-medium text-text-secondary mb-1.5 block">Confirm New Password</label>
+                                    <div className="relative">
+                                        <input
+                                            type={showConfirmPwd ? 'text' : 'password'}
+                                            value={passwordForm.confirmPassword}
+                                            onChange={e => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })}
+                                            placeholder="Confirm new password"
+                                            className="input-field !pr-10"
+                                        />
+                                        <button type="button" onClick={() => setShowConfirmPwd(!showConfirmPwd)} className="absolute right-3 top-1/2 -translate-y-1/2 text-text-secondary hover:text-text-primary transition-colors">
+                                            {showConfirmPwd ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {passwordForm.newPassword && passwordForm.confirmPassword && passwordForm.newPassword !== passwordForm.confirmPassword && (
+                                    <p className="text-xs text-danger flex items-center gap-1">⚠️ Passwords do not match</p>
+                                )}
+
+                                <button
+                                    onClick={handleChangePassword}
+                                    disabled={changingPassword || !passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.confirmPassword}
+                                    className="btn-primary mt-2 flex items-center gap-2"
+                                >
+                                    {changingPassword ? <Loader2 className="w-4 h-4 animate-spin" /> : <Key className="w-4 h-4" />}
+                                    {changingPassword ? 'Updating...' : 'Update Password'}
+                                </button>
                             </div>
-                            <a href="/forgot-password" className="btn-outline mt-4 inline-flex items-center gap-2">
-                                <Key className="w-4 h-4" />
-                                Reset Password via Email
-                            </a>
                         </motion.div>
                     )}
                 </motion.div>

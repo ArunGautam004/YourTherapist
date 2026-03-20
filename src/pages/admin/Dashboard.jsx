@@ -65,6 +65,7 @@ const AdminDashboard = () => {
   const [patients, setPatients]           = useState([]);
   const [analytics, setAnalytics]         = useState(null);
   const [loading, setLoading]             = useState(true);
+  const [totalPatientCount, setTotalPatientCount] = useState(0);
   const [totalUnreadMessages, setTotalUnreadMessages] = useState(0);
 
   const [notifications, setNotifications]     = useState([]);
@@ -97,7 +98,9 @@ const AdminDashboard = () => {
         ]);
         const paid = (todayRes.data.appointments || []).filter(a => a.paymentStatus === 'paid');
         setTodaySessions(paid);
-        setPatients(patientsRes.data.patients?.slice(0, 5) || []);
+        const allDoctorPatients = patientsRes.data.patients || [];
+        setPatients(allDoctorPatients.slice(0, 5));
+        setTotalPatientCount(allDoctorPatients.length);
         setAnalytics(analyticsRes.data || null);
         setTotalUnreadMessages((messagesRes.data.conversations || []).reduce((s, c) => s + (c.unreadCount || 0), 0));
         setNotifications(notifRes.data.notifications || []);
@@ -257,7 +260,7 @@ const AdminDashboard = () => {
             {[
               {
                 label: 'Total Patients', icon: Users, color: 'from-primary to-emerald-400',
-                value: loading ? '–' : analytics?.totalPatients || '0',
+                value: loading ? '–' : totalPatientCount,
                 sub: 'All time',
                 link: '/admin/patients',
               },

@@ -21,6 +21,12 @@ const AdminPatients = () => {
   const [loading, setLoading] = useState(true);
   const [totalUnread, setTotalUnread] = useState(0);
 
+  // All Patients directory
+  const [viewMode, setViewMode] = useState('my'); // 'my' | 'all'
+  const [allPatients, setAllPatients] = useState([]);
+  const [allPatientsSearch, setAllPatientsSearch] = useState('');
+  const [allPatientsLoading, setAllPatientsLoading] = useState(false);
+
   const [expandedApt, setExpandedApt] = useState(null);
   const [aptDetail, setAptDetail] = useState({});
   const [aptDetailLoading, setAptDetailLoading] = useState(null);
@@ -101,6 +107,23 @@ const AdminPatients = () => {
   useEffect(() => {
     fetchPatients();
   }, [searchQuery, filterRisk]);
+
+  // Fetch all patients on site
+  const fetchAllPatients = async () => {
+    setAllPatientsLoading(true);
+    try {
+      const { data } = await patientAPI.getAllOnSite({ search: allPatientsSearch });
+      setAllPatients(data.patients || []);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setAllPatientsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (viewMode === 'all') fetchAllPatients();
+  }, [viewMode, allPatientsSearch]);
 
   const handleSelectPatient = async (patient) => {
     setSelectedPatient(patient);
@@ -196,7 +219,7 @@ const AdminPatients = () => {
         patient: selectedPatient._id,
         sessionDescription: newNoteText.trim(),
         riskLevel: newNoteRisk,
-        progressStatus: 'progress',
+        progressStatus: 'stable',
         isSharedWithPatient: false,
       });
       toast.success('Clinical note saved!');
@@ -255,14 +278,30 @@ const AdminPatients = () => {
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
             <div>
               <h1 className="font-display text-2xl md:text-3xl font-bold text-text-primary">
-                My <span className="gradient-text">Patients</span>
+                {viewMode === 'my' ? <span>My <span className="gradient-text">Patients</span></span> : <span>All <span className="gradient-text">Patients</span></span>}
               </h1>
-              <p className="text-text-secondary mt-1">{patients.length} patients under your care</p>
+              <p className="text-text-secondary mt-1">
+                {viewMode === 'my' ? `${patients.length} patients under your care` : `${allPatients.length} patients on the platform`}
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setViewMode('my'); setSelectedPatient(null); setPatientDetail(null); setSearchParams({}); }}
+                className={`px-5 py-2.5 rounded-xl text-sm font-medium transition-all ${viewMode === 'my' ? 'bg-primary text-white shadow-glow' : 'bg-gray-50 text-text-secondary hover:bg-gray-100'}`}
+              >
+                My Patients
+              </button>
+              <button
+                onClick={() => { setViewMode('all'); setSelectedPatient(null); setPatientDetail(null); setSearchParams({}); }}
+                className={`px-5 py-2.5 rounded-xl text-sm font-medium transition-all ${viewMode === 'all' ? 'bg-primary text-white shadow-glow' : 'bg-gray-50 text-text-secondary hover:bg-gray-100'}`}
+              >
+                All Patients
+              </button>
             </div>
           </div>
 
-          {/* ✅ Search & Filter ONLY shown when NOT viewing a patient profile */}
-          {!selectedPatient && (
+          {/* ✅ Search & Filter ONLY shown in 'my' view when NOT viewing a patient profile */}
+          {viewMode === 'my' && !selectedPatient && (
             <div className="card mb-6 flex flex-col sm:flex-row items-center gap-3">
               <div className="relative flex-1 w-full">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-secondary/50" />
@@ -289,7 +328,7 @@ const AdminPatients = () => {
             </div>
           )}
 
-          {selectedPatient ? (
+          {viewMode === 'my' && selectedPatient ? (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
               <button
                 onClick={handleBackToList}
@@ -568,10 +607,10 @@ const AdminPatients = () => {
                       </table>
                       {paidAppointments.length === 0 && (
                         <div className="text-center py-10">
-                        <Video className="w-10 h-10 text-gray-300 mx-auto mb-2" />
-                        <p className="text-sm font-medium text-text-primary">No sessions yet</p>
-                        <p className="text-xs text-text-secondary mt-1">Sessions will appear here once the patient books and pays.</p>
-                      </div>
+                          <Video className="w-10 h-10 text-gray-300 mx-auto mb-2" />
+                          <p className="text-sm font-medium text-text-primary">No sessions yet</p>
+                          <p className="text-xs text-text-secondary mt-1">Sessions will appear here once the patient books and pays.</p>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -657,11 +696,11 @@ const AdminPatients = () => {
                 </div>
               </div>
             </motion.div>
-          ) : loading ? (
+          ) : viewMode === 'my' && loading ? (
             <div className="flex items-center justify-center py-16">
               <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin" />
             </div>
-          ) : (
+          ) : viewMode === 'my' ? (
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
               {patients.map((patient) => (
                 <motion.div
@@ -702,6 +741,80 @@ const AdminPatients = () => {
                 <div className="col-span-full text-center py-16 text-text-secondary">No patients found</div>
               )}
             </div>
+          ) : null}
+
+          {/* ── ALL PATIENTS DIRECTORY VIEW ────────────────────────────── */}
+          {viewMode === 'all' && !selectedPatient && (
+            <>
+              <div className="card mb-6">
+                <div className="relative">
+                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-secondary/50" />
+                  <input
+                    type="text"
+                    placeholder="Search all patients by name..."
+                    value={allPatientsSearch}
+                    onChange={(e) => setAllPatientsSearch(e.target.value)}
+                    className="input-field !pl-12"
+                  />
+                </div>
+              </div>
+
+              {allPatientsLoading ? (
+                <div className="flex items-center justify-center py-16">
+                  <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+                </div>
+              ) : (
+                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {allPatients.map((pt) => (
+                    <motion.div
+                      key={pt._id}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="card"
+                    >
+                      <div className="flex items-center gap-3 mb-4">
+                        <div className="w-12 h-12 rounded-xl bg-primary-light flex items-center justify-center text-2xl flex-shrink-0 overflow-hidden">
+                          {pt.profilePic ? (
+                            <img src={pt.profilePic} alt={pt.name} className="w-full h-full object-cover" />
+                          ) : '👤'}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-text-primary truncate">{pt.name}</p>
+                          <p className="text-xs text-text-secondary">{pt.gender || ''}</p>
+                        </div>
+                      </div>
+                      <div className="space-y-2 mb-4">
+                        <div className="p-3 rounded-xl bg-gray-50">
+                          <p className="text-xs text-text-secondary">Email</p>
+                          <p className="text-sm font-medium text-text-primary break-all">{pt.email}</p>
+                        </div>
+                        <div className="p-3 rounded-xl bg-gray-50">
+                          <p className="text-xs text-text-secondary">Phone</p>
+                          <p className="text-sm font-medium text-text-primary">{pt.phone || '—'}</p>
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => navigate('/admin/messages', { state: { targetPartner: pt } })}
+                          className="btn-primary flex-1 flex items-center justify-center gap-2 !py-2.5 text-sm"
+                        >
+                          <MessageCircle className="w-4 h-4" /> Message
+                        </button>
+                        <button
+                          onClick={() => { setSelectedPatient(pt); setShowEmailModal(true); }}
+                          className="btn-outline flex-1 flex items-center justify-center gap-2 !py-2.5 text-sm"
+                        >
+                          <Mail className="w-4 h-4" /> Email
+                        </button>
+                      </div>
+                    </motion.div>
+                  ))}
+                  {allPatients.length === 0 && (
+                    <div className="col-span-full text-center py-16 text-text-secondary">No patients found</div>
+                  )}
+                </div>
+              )}
+            </>
           )}
         </motion.div>
       </main>

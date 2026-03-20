@@ -11,15 +11,18 @@ const AdminAnalytics = () => {
   const [analytics, setAnalytics] = useState(null);
   const [loading, setLoading] = useState(true);
   const [totalUnread, setTotalUnread] = useState(0);
+  const [patientCount, setPatientCount] = useState(0);
 
   useEffect(() => {
     const fetchAnalytics = async () => {
       try {
-        const [{ data }, { data: msgData }] = await Promise.all([
+        const [{ data }, { data: msgData }, { data: pData }] = await Promise.all([
           patientAPI.getAnalytics(),
-          messageAPI.getConversations().catch(() => ({ data: { conversations: [] } }))
+          messageAPI.getConversations().catch(() => ({ data: { conversations: [] } })),
+          patientAPI.getAll().catch(() => ({ data: { patients: [] } }))
         ]);
         setAnalytics(data);
+        setPatientCount((pData.patients || []).length);
         const unread = (msgData.conversations || []).reduce((sum, c) => sum + (c.unreadCount || 0), 0);
         setTotalUnread(unread);
       } catch (err) {
@@ -55,7 +58,7 @@ const AdminAnalytics = () => {
   }
 
   const stats = [
-    { label: 'Total Patients', value: analytics?.totalPatients || '—', icon: Users, color: 'from-primary to-emerald-400' },
+    { label: 'Total Patients', value: patientCount, icon: Users, color: 'from-primary to-emerald-400' },
     {
       label: 'Total Sessions',
       value: analytics?.totalSessions || '—',

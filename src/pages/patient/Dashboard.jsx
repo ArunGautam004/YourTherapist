@@ -1,12 +1,12 @@
+// src/pages/patient/Dashboard.jsx
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Link, useNavigate } from 'react-router-dom';
 import {
-  LayoutDashboard, Calendar, BookOpen, MessageCircle, Settings,
-  Video, Clock, Heart, Flame, TrendingUp, TrendingDown,
-  Sun, Moon, ChevronRight, Sparkles, Wind, Activity, Star, Shield, Smile, Bell
+  Calendar, BookOpen, MessageCircle, Video, Clock, Heart, Flame, TrendingUp, TrendingDown,
+  Sun, Moon, ChevronRight, Sparkles, Wind, Activity, Star, Shield, Bell
 } from 'lucide-react';
-import Sidebar from '../../components/layout/Sidebar';
+import PatientSidebar from './Sidebar';
 import { useAuth } from '../../context/AuthContext';
 import { appointmentAPI, messageAPI, moodAPI, notificationAPI } from '../../services/api';
 import { getSocket } from '../../services/socket';
@@ -54,31 +54,19 @@ const getMoodLabel = (score) => {
 
 const PatientDashboard = () => {
   const { user } = useAuth();
-
   const [upcomingSessions, setUpcomingSessions] = useState([]);
   const [moodStats, setMoodStats]     = useState(null);
   const [moodEntries, setMoodEntries] = useState([]);
   const [totalUnread, setTotalUnread] = useState(0);
   const [loading, setLoading]         = useState(true);
   const [tip] = useState(() => WELLNESS_TIPS[Math.floor(Math.random() * WELLNESS_TIPS.length)]);
-
   const navigate = useNavigate();
   const greeting = getGreeting();
 
-  // Notification state — desktop bell only
   const [notifications, setNotifications] = useState([]);
   const [unreadNotifCount, setUnreadNotifCount] = useState(0);
   const [showNotifications, setShowNotifications] = useState(false);
   const notifRef = useRef(null);
-
-  const patientLinks = [
-    { name: 'Dashboard',        path: '/patient/dashboard', icon: LayoutDashboard },
-    { name: 'My Sessions',      path: '/patient/sessions',  icon: Clock },
-    { name: 'Book Appointment', path: '/patient/book',      icon: Calendar },
-    { name: 'Mood Journal',     path: '/patient/journal',   icon: BookOpen },
-    { name: 'Messages',         path: '/patient/messages',  icon: MessageCircle, badge: totalUnread > 0 ? String(totalUnread) : null },
-    { name: 'Settings',         path: '/patient/settings',  icon: Settings },
-  ];
 
   useEffect(() => {
     const load = async () => {
@@ -114,7 +102,6 @@ const PatientDashboard = () => {
     load();
   }, []);
 
-  // Real-time notifications via socket
   useEffect(() => {
     const socket = getSocket();
     if (!socket) return;
@@ -126,7 +113,6 @@ const PatientDashboard = () => {
     return () => socket.off('notification:new', onNew);
   }, []);
 
-  // Close notification panel on outside click
   useEffect(() => {
     const handler = (e) => {
       if (notifRef.current && !notifRef.current.contains(e.target)) {
@@ -181,27 +167,23 @@ const PatientDashboard = () => {
   })();
 
   const todayMood = moodEntries.find(e => new Date(e.date).toDateString() === new Date().toDateString());
-  const nextSession = upcomingSessions[0];
+  const nextSession = upcomingSessions;
   const nextSessionDate = nextSession
     ? new Date(nextSession.date).toLocaleDateString('en', { weekday: 'long', month: 'long', day: 'numeric' })
     : null;
 
   return (
     <div className="min-h-screen bg-background">
-      <Sidebar links={patientLinks} userRole="patient" />
+      <PatientSidebar unreadMessages={totalUnread} />
 
       <main className="lg:ml-[260px] pt-20 lg:pt-6 p-4 md:p-6 lg:p-8">
         <motion.div initial="hidden" animate="visible" variants={stagger} className="max-w-5xl mx-auto">
-
-          {/* ── Hero Banner ──────────────────────────────────────────────── */}
-          {/* Notification panel rendered OUTSIDE hero so overflow:hidden doesn't clip it */}
           <div className="relative mb-6">
             <motion.div variants={fadeInUp} className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-primary via-emerald-500 to-teal-600 p-5 md:p-8 shadow-soft-xl">
               <div className="absolute -top-10 -right-10 w-52 h-52 rounded-full bg-white/5 pointer-events-none" />
               <div className="absolute -bottom-14 -left-6 w-40 h-40 rounded-full bg-white/5 pointer-events-none" />
 
               <div className="relative">
-                {/* Top row: greeting + bell */}
                 <div className="flex items-start justify-between gap-3 mb-4">
                   <div>
                     <div className="flex items-center gap-1.5 mb-1">
@@ -209,11 +191,10 @@ const PatientDashboard = () => {
                       <span className="text-white/60 text-xs">{greeting.text}</span>
                     </div>
                     <h1 className="font-display text-2xl md:text-3xl font-bold text-white">
-                      {user?.name?.split(' ')[0] || 'Welcome'} 
+                      {user?.name?.split(' ') || 'Welcome'} 
                     </h1>
                   </div>
 
-                  {/* Bell — desktop only, panel rendered outside hero below */}
                   <div className="hidden lg:block flex-shrink-0" ref={notifRef}>
                     <button
                       onClick={handleBellClick}
@@ -229,9 +210,7 @@ const PatientDashboard = () => {
                   </div>
                 </div>
 
-                {/* Bottom row: mood box + wellness ring — always visible */}
                 <div className="flex items-center gap-4">
-                  {/* Today's mood */}
                   <div className="flex flex-col items-center gap-1">
                     <div className={`w-16 h-16 md:w-20 md:h-20 rounded-2xl bg-gradient-to-br ${getMoodBg(todayMood?.score)} flex flex-col items-center justify-center shadow-soft border border-white/20`}>
                       <span className="text-2xl md:text-3xl">{todayMood ? (MOOD_EMOJI[todayMood.score] || '😐') : '❓'}</span>
@@ -240,7 +219,6 @@ const PatientDashboard = () => {
                     <span className="text-white/60 text-[10px] font-medium">Today's mood</span>
                   </div>
 
-                  {/* Wellness score ring */}
                   <div className="flex flex-col items-center gap-1">
                     <div className="relative w-16 h-16 md:w-20 md:h-20">
                       <svg className="w-full h-full -rotate-90" viewBox="0 0 80 80">
@@ -265,7 +243,6 @@ const PatientDashboard = () => {
               </div>
             </motion.div>
 
-            {/* Notification panel — outside hero so it's never clipped */}
             <AnimatePresence>
               {showNotifications && (
                 <motion.div
@@ -310,7 +287,7 @@ const PatientDashboard = () => {
               )}
             </AnimatePresence>
           </div>
-          {/* ── Stats Row ─────────────────────────────────────────────────── */}
+
           <motion.div variants={fadeInUp} className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
             {[
               {
@@ -369,8 +346,6 @@ const PatientDashboard = () => {
             </div>
           ) : (
             <div className="grid lg:grid-cols-3 gap-5">
-
-              {/* ── Upcoming Sessions ─────────────────────────────────── */}
               <motion.div variants={fadeInUp} className="lg:col-span-2 card">
                 <div className="flex items-center justify-between mb-5">
                   <h2 className="font-display font-bold text-lg text-text-primary">Upcoming Sessions</h2>
@@ -431,10 +406,7 @@ const PatientDashboard = () => {
                 )}
               </motion.div>
 
-              {/* ── Right Column ───────────────────────────────────────── */}
               <div className="space-y-4">
-
-                {/* Daily Wellness Tip */}
                 <motion.div variants={fadeInUp} className="card bg-gradient-to-br from-primary-light/60 to-teal-50 border border-primary/10">
                   <div className="flex items-start gap-3">
                     <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
@@ -447,7 +419,6 @@ const PatientDashboard = () => {
                   </div>
                 </motion.div>
 
-                {/* Mood Chart */}
                 <motion.div variants={fadeInUp} className="card">
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="font-display font-bold text-text-primary text-sm">Mood This Week</h3>
@@ -500,7 +471,6 @@ const PatientDashboard = () => {
                   )}
                 </motion.div>
 
-                {/* Wellness Summary */}
                 {moodStats && (
                   <motion.div variants={fadeInUp} className="card">
                     <h3 className="font-display font-bold text-text-primary text-sm mb-3">Wellness Summary</h3>

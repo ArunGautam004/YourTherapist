@@ -1,11 +1,9 @@
+// src/pages/patient/Settings.jsx
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import {
-    LayoutDashboard, Calendar, BookOpen, MessageCircle, Settings,
-    Clock, Save, Loader2, Camera, Mail, Shield, Key, User, Upload
-} from 'lucide-react';
+import { Save, Loader2, Camera, Shield, Key, User, Upload, Eye, EyeOff, Lock } from 'lucide-react';
 import toast from 'react-hot-toast';
-import Sidebar from '../../components/layout/Sidebar';
+import PatientSidebar from './Sidebar';
 import { useAuth } from '../../context/AuthContext';
 import { authAPI, messageAPI, uploadAPI } from '../../services/api';
 
@@ -17,24 +15,17 @@ const PatientSettings = () => {
     const [totalUnread, setTotalUnread] = useState(0);
     const fileInputRef = useRef(null);
 
-    // Consistent sidebar — live unread badge
-    const patientLinks = [
-        { name: 'Dashboard',        path: '/patient/dashboard', icon: LayoutDashboard },
-        { name: 'My Sessions',      path: '/patient/sessions',  icon: Clock },
-        { name: 'Book Appointment', path: '/patient/book',      icon: Calendar },
-        { name: 'Mood Journal',     path: '/patient/journal',   icon: BookOpen },
-        { name: 'Messages',         path: '/patient/messages',  icon: MessageCircle, badge: totalUnread > 0 ? String(totalUnread) : null },
-        { name: 'Settings',         path: '/patient/settings',  icon: Settings },
-    ];
-
     const [form, setForm] = useState({
-        name: '',
-        phone: '',
-        gender: '',
-        dob: '',
-        address: '',
-        profilePic: '',
+        name: '', phone: '', gender: '', dob: '', address: '', profilePic: '',
     });
+
+    const [passwordForm, setPasswordForm] = useState({
+        currentPassword: '', newPassword: '', confirmPassword: '',
+    });
+    const [changingPassword, setChangingPassword] = useState(false);
+    const [showCurrentPwd, setShowCurrentPwd] = useState(false);
+    const [showNewPwd, setShowNewPwd] = useState(false);
+    const [showConfirmPwd, setShowConfirmPwd] = useState(false);
 
     useEffect(() => {
         if (user) {
@@ -77,12 +68,40 @@ const PatientSettings = () => {
         try {
             const { data } = await uploadAPI.uploadImage(formData);
             setForm(prev => ({ ...prev, profilePic: data.url }));
-            toast.success('Image uploaded!');
+            // Auto-save to DB so the picture persists immediately
+            try {
+                const { data: profileData } = await authAPI.updateProfile({ profilePic: data.url });
+                updateUser(profileData.user);
+            } catch {}
+            toast.success('Image uploaded & saved!');
         } catch {
             toast.error('Upload failed. Try pasting a URL instead.');
         } finally {
             setUploadingImage(false);
             if (fileInputRef.current) fileInputRef.current.value = '';
+        }
+    };
+
+    const handleChangePassword = async () => {
+        const { currentPassword, newPassword, confirmPassword } = passwordForm;
+        if (!currentPassword || !newPassword || !confirmPassword) {
+            toast.error('Please fill in all fields'); return;
+        }
+        if (newPassword.length < 6) {
+            toast.error('New password must be at least 6 characters'); return;
+        }
+        if (newPassword !== confirmPassword) {
+            toast.error('New passwords do not match'); return;
+        }
+        setChangingPassword(true);
+        try {
+            const { data } = await authAPI.changePassword({ currentPassword, newPassword });
+            toast.success(data.message || 'Password changed successfully!');
+            setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+        } catch (err) {
+            toast.error(err.response?.data?.message || 'Failed to change password');
+        } finally {
+            setChangingPassword(false);
         }
     };
 
@@ -93,7 +112,7 @@ const PatientSettings = () => {
 
     return (
         <div className="min-h-screen bg-background">
-            <Sidebar links={patientLinks} userRole="patient" />
+            <PatientSidebar unreadMessages={totalUnread} />
 
             <main className="lg:ml-[260px] pt-20 lg:pt-6 p-4 md:p-6 lg:p-8">
                 <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="max-w-3xl mx-auto">
@@ -102,7 +121,6 @@ const PatientSettings = () => {
                     </h1>
                     <p className="text-text-secondary mb-8">Manage your profile and account settings</p>
 
-                    {/* Tabs */}
                     <div className="flex gap-2 mb-8">
                         {tabs.map(tab => (
                             <button
@@ -118,10 +136,8 @@ const PatientSettings = () => {
                         ))}
                     </div>
 
-                    {/* Profile Tab */}
                     {activeTab === 'profile' && (
                         <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-6">
-                            {/* Profile Picture */}
                             <div className="card">
                                 <h3 className="font-display font-bold text-lg text-text-primary mb-5 flex items-center gap-2">
                                     <Camera className="w-5 h-5 text-primary" /> Profile Picture
@@ -157,7 +173,6 @@ const PatientSettings = () => {
                                 </div>
                             </div>
 
-                            {/* Personal Info */}
                             <div className="card">
                                 <h3 className="font-display font-bold text-lg text-text-primary mb-5">Personal Information</h3>
                                 <div className="grid md:grid-cols-2 gap-4">
@@ -195,25 +210,71 @@ const PatientSettings = () => {
                         </motion.div>
                     )}
 
-                    {/* Security Tab */}
                     {activeTab === 'security' && (
                         <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="card">
-                            <h3 className="font-display font-bold text-lg text-text-primary mb-5 flex items-center gap-2">
-                                <Key className="w-5 h-5 text-primary" /> Change Password
+                            <h3 className="font-display font-bold text-lg text-text-primary mb-6 flex items-center gap-2">
+                                <Lock className="w-5 h-5 text-primary" /> Change Password
                             </h3>
-                            <p className="text-sm text-text-secondary mb-6">
-                                To change your password, use the "Forgot Password" flow to receive an OTP on your email.
-                            </p>
-                            <div className="bg-primary-light/50 border border-primary/20 rounded-2xl p-4 flex items-start gap-3">
-                                <Mail className="w-5 h-5 text-primary mt-0.5 flex-shrink-0" />
+                            <div className="space-y-4 max-w-md">
                                 <div>
-                                    <p className="text-sm font-medium text-text-primary">Your registered email</p>
-                                    <p className="text-sm text-text-secondary">{user?.email}</p>
+                                    <label className="text-sm font-medium text-text-secondary mb-1.5 block">Current Password</label>
+                                    <div className="relative">
+                                        <input
+                                            type={showCurrentPwd ? 'text' : 'password'}
+                                            value={passwordForm.currentPassword}
+                                            onChange={e => setPasswordForm({ ...passwordForm, currentPassword: e.target.value })}
+                                            placeholder="Enter current password"
+                                            className="input-field !pr-10"
+                                        />
+                                        <button type="button" onClick={() => setShowCurrentPwd(!showCurrentPwd)} className="absolute right-3 top-1/2 -translate-y-1/2 text-text-secondary hover:text-text-primary transition-colors">
+                                            {showCurrentPwd ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                        </button>
+                                    </div>
                                 </div>
+                                <div>
+                                    <label className="text-sm font-medium text-text-secondary mb-1.5 block">New Password</label>
+                                    <div className="relative">
+                                        <input
+                                            type={showNewPwd ? 'text' : 'password'}
+                                            value={passwordForm.newPassword}
+                                            onChange={e => setPasswordForm({ ...passwordForm, newPassword: e.target.value })}
+                                            placeholder="Enter new password (min 6 characters)"
+                                            className="input-field !pr-10"
+                                        />
+                                        <button type="button" onClick={() => setShowNewPwd(!showNewPwd)} className="absolute right-3 top-1/2 -translate-y-1/2 text-text-secondary hover:text-text-primary transition-colors">
+                                            {showNewPwd ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                        </button>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="text-sm font-medium text-text-secondary mb-1.5 block">Confirm New Password</label>
+                                    <div className="relative">
+                                        <input
+                                            type={showConfirmPwd ? 'text' : 'password'}
+                                            value={passwordForm.confirmPassword}
+                                            onChange={e => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })}
+                                            placeholder="Confirm new password"
+                                            className="input-field !pr-10"
+                                        />
+                                        <button type="button" onClick={() => setShowConfirmPwd(!showConfirmPwd)} className="absolute right-3 top-1/2 -translate-y-1/2 text-text-secondary hover:text-text-primary transition-colors">
+                                            {showConfirmPwd ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {passwordForm.newPassword && passwordForm.confirmPassword && passwordForm.newPassword !== passwordForm.confirmPassword && (
+                                    <p className="text-xs text-danger flex items-center gap-1">⚠️ Passwords do not match</p>
+                                )}
+
+                                <button
+                                    onClick={handleChangePassword}
+                                    disabled={changingPassword || !passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.confirmPassword}
+                                    className="btn-primary mt-2 flex items-center gap-2"
+                                >
+                                    {changingPassword ? <Loader2 className="w-4 h-4 animate-spin" /> : <Key className="w-4 h-4" />}
+                                    {changingPassword ? 'Updating...' : 'Update Password'}
+                                </button>
                             </div>
-                            <a href="/forgot-password" className="btn-outline mt-4 inline-flex items-center gap-2">
-                                <Key className="w-4 h-4" /> Reset Password via Email
-                            </a>
                         </motion.div>
                     )}
                 </motion.div>

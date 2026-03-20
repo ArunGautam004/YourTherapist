@@ -1,23 +1,12 @@
+// src/pages/patient/Messages.jsx
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { useLocation } from 'react-router-dom';
-import {
-    LayoutDashboard, Calendar, BookOpen, MessageCircle, Settings,
-    Send, Search, Loader2, ArrowLeft, Clock
-} from 'lucide-react';
-import Sidebar from '../../components/layout/Sidebar';
+import { Send, Search, Loader2, ArrowLeft, MessageCircle } from 'lucide-react';
+import PatientSidebar from './Sidebar';
 import { useAuth } from '../../context/AuthContext';
 import { messageAPI } from '../../services/api';
 import { getSocket } from '../../services/socket';
-
-const patientLinks = [
-    { name: 'Dashboard',        path: '/patient/dashboard', icon: LayoutDashboard },
-    { name: 'My Sessions',      path: '/patient/sessions',  icon: Clock },
-    { name: 'Book Appointment', path: '/patient/book',      icon: Calendar },
-    { name: 'Mood Journal',     path: '/patient/journal',   icon: BookOpen },
-    { name: 'Messages',         path: '/patient/messages',  icon: MessageCircle },
-    { name: 'Settings',         path: '/patient/settings',  icon: Settings },
-];
 
 const timeStr = (dateStr) => {
     if (!dateStr) return '';
@@ -43,23 +32,21 @@ const PatientMessages = () => {
 
     const totalUnread = conversations.reduce((sum, c) => sum + (c.unreadCount || 0), 0);
 
-    // Update sidebar badge
-    const sidebarLinks = patientLinks.map(l =>
-        l.name === 'Messages'
-            ? { ...l, badge: totalUnread > 0 ? totalUnread.toString() : null }
-            : l
-    );
-
-
-    // ── Load conversations once ──────────────────────────────────────────────
     useEffect(() => {
         const fetchConversations = async () => {
             try {
                 const { data } = await messageAPI.getConversations();
                 const convos = data.conversations || [];
+
+                // Pin doctor@youtherapist.com conversation at the top
+                const PINNED_EMAIL = 'doctor@youtherapist.com';
+                const pinnedIndex = convos.findIndex(c => c.partner?.email === PINNED_EMAIL);
+                if (pinnedIndex > 0) {
+                    const [pinned] = convos.splice(pinnedIndex, 1);
+                    convos.unshift(pinned);
+                }
                 setConversations(convos);
 
-                // Auto-open if navigated with a target partner
                 const target = location.state?.targetPartner;
                 if (target) {
                     const existing = convos.find(c => c.partner?._id === target._id);
@@ -76,7 +63,6 @@ const PatientMessages = () => {
         fetchConversations();
     }, []);
 
-    // ── Load messages when active conversation changes ───────────────────────
     useEffect(() => {
         if (!activeConvo?.partner?._id) return;
 
@@ -94,12 +80,10 @@ const PatientMessages = () => {
         fetchMessages();
     }, [activeConvo?.partner?._id]);
 
-    // ── Auto-scroll ──────────────────────────────────────────────────────────
     useEffect(() => {
         messageEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
 
-    // ── Real-time socket messages ────────────────────────────────────────────
     useEffect(() => {
         const socket = getSocket();
         if (!socket) return;
@@ -141,7 +125,6 @@ const PatientMessages = () => {
         return () => socket.off('message:receive', handleNewMessage);
     }, [user?._id]);
 
-    // ── Send message ─────────────────────────────────────────────────────────
     const handleSend = async (e) => {
         e?.preventDefault();
         const text = newMessage.trim();
@@ -149,7 +132,6 @@ const PatientMessages = () => {
 
         setNewMessage('');
         setSendingMsg(true);
-
 
         const optimistic = {
             _id: `optimistic-${Date.now()}`,
@@ -161,18 +143,9 @@ const PatientMessages = () => {
         setMessages(prev => [...prev, optimistic]);
 
         try {
-            const { data } = await messageAPI.send({
-                receiverId: activeConvo.partner?._id,
-                text,
-            });
-
-            setMessages(prev => prev.map(m =>
-                m._id === optimistic._id ? data.message : m
-            ));
-
-            // Real-time delivery handled server-side
+            const { data } = await messageAPI.send({ receiverId: activeConvo.partner?._id, text });
+            setMessages(prev => prev.map(m => m._id === optimistic._id ? data.message : m));
         } catch (err) {
-            console.error(err);
             setMessages(prev => prev.filter(m => m._id !== optimistic._id));
             setNewMessage(text);
         } finally {
@@ -189,7 +162,7 @@ const PatientMessages = () => {
 
     return (
         <div className="min-h-screen bg-background">
-            <Sidebar links={sidebarLinks} userRole="patient" />
+            <PatientSidebar unreadMessages={totalUnread} />
 
             <main className="lg:ml-[260px] pt-16 lg:pt-6 flex flex-col" style={{ height: '100dvh' }}>
                 <div className="px-4 md:px-6 lg:px-8 py-4 lg:py-6 flex-shrink-0">
@@ -202,7 +175,6 @@ const PatientMessages = () => {
                 <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="h-full max-w-5xl mx-auto">
                     <div className="card overflow-hidden h-full" style={{ minHeight: 0 }}>
                         <div className="flex h-full">
-                            {/* Conversations List */}
                             <div className={`w-full md:w-72 border-r border-gray-100 flex-col ${activeConvo ? 'hidden md:flex' : 'flex'}`}>
                                 <div className="p-3 border-b border-gray-100">
                                     <div className="relative">
@@ -231,9 +203,7 @@ const PatientMessages = () => {
                                                 <div className="flex-1 min-w-0">
                                                     <p className="text-sm font-semibold text-text-primary truncate">
                                                         {convo.partner?.name
-                                                            ? (convo.partner.name.toLowerCase().startsWith('dr')
-                                                                ? convo.partner.name
-                                                                : `Dr. ${convo.partner.name}`)
+                                                            ? (convo.partner.name.toLowerCase().startsWith('dr') ? convo.partner.name : `Dr. ${convo.partner.name}`)
                                                             : convo.partner?.email || 'Therapist'}
                                                     </p>
                                                     <p className="text-xs text-text-secondary truncate">{convo.lastMessage?.text || 'Start a conversation'}</p>
@@ -255,11 +225,9 @@ const PatientMessages = () => {
                                 </div>
                             </div>
 
-                            {/* Chat Area */}
                             <div className={`flex-1 min-w-0 flex flex-col ${!activeConvo ? 'hidden md:flex' : 'flex'}`}>
                                 {activeConvo ? (
                                     <>
-                                        {/* Chat Header */}
                                         <div className="flex items-center gap-3 p-4 border-b border-gray-100 bg-white">
                                             <button
                                                 onClick={() => setActiveConvo(null)}
@@ -275,9 +243,7 @@ const PatientMessages = () => {
                                             <div>
                                                 <p className="font-semibold text-text-primary text-sm">
                                                     {activeConvo.partner?.name
-                                                        ? (activeConvo.partner.name.toLowerCase().startsWith('dr')
-                                                            ? activeConvo.partner.name
-                                                            : `Dr. ${activeConvo.partner.name}`)
+                                                        ? (activeConvo.partner.name.toLowerCase().startsWith('dr') ? activeConvo.partner.name : `Dr. ${activeConvo.partner.name}`)
                                                         : activeConvo.partner?.email || 'Therapist'}
                                                 </p>
                                                 <p className="text-xs text-success flex items-center gap-1">
@@ -286,7 +252,6 @@ const PatientMessages = () => {
                                             </div>
                                         </div>
 
-                                        {/* Messages */}
                                         <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50/30">
                                             {messages.map((msg, i) => {
                                                 const isOwn = msg.sender === user?._id || msg.sender?._id === user?._id;
@@ -308,7 +273,6 @@ const PatientMessages = () => {
                                             <div ref={messageEndRef} />
                                         </div>
 
-                                        {/* Input */}
                                         <div className="p-3 border-t border-gray-100 bg-white flex items-end gap-2 flex-shrink-0">
                                             <textarea
                                                 rows={1}

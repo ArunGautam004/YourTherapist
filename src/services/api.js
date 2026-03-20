@@ -36,6 +36,7 @@ export const authAPI = {
   updateProfile: (data) => api.put('/auth/profile', data),
   forgotPassword:(data) => api.post('/auth/forgot-password', data),
   resetPassword: (data) => api.post('/auth/reset-password', data),
+  changePassword:(data) => api.put('/auth/change-password', data),
 };
 
 export const appointmentAPI = {
@@ -56,6 +57,7 @@ export const doctorAPI = {
 
 export const patientAPI = {
   getAll:       (params)   => api.get('/patients', { params }),
+  getAllOnSite: (params)   => api.get('/patients/all', { params }),
   getById:      (id)       => api.get(`/patients/${id}`),
   update:       (id, data) => api.put(`/patients/${id}`, data),
   getAnalytics: ()         => api.get('/patients/analytics'),

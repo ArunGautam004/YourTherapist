@@ -14,7 +14,7 @@ export const getConversations = async (req, res, next) => {
     const partnerIds = [...new Set([...sent.map(String), ...received.map(String)])];
 
     const conversations = await Promise.all(partnerIds.map(async (partnerId) => {
-      const partner = await User.findById(partnerId).select('name role profilePic specialization');
+      const partner = await User.findById(partnerId).select('name email role profilePic specialization');
 
       const lastMessage = await Message.findOne({
         $or: [

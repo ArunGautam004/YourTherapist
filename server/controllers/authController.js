@@ -1,6 +1,38 @@
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
+import Message from '../models/Message.js';
 import { sendEmail } from '../utils/sendEmail.js';
+
+// Auto-create welcome conversation with the platform doctor
+const DOCTOR_EMAIL = 'doctor@youtherapist.com';
+
+const createWelcomeConversation = async (patientId) => {
+  try {
+    const doctor = await User.findOne({ email: DOCTOR_EMAIL });
+    if (!doctor) {
+      console.log('⚠️  Doctor account (doctor@youtherapist.com) not found — skipping welcome message');
+      return;
+    }
+
+    // Check if conversation already exists (avoid duplicates)
+    const existing = await Message.findOne({
+      $or: [
+        { sender: doctor._id, receiver: patientId },
+        { sender: patientId, receiver: doctor._id },
+      ],
+    });
+    if (existing) return;
+
+    await Message.create({
+      sender: doctor._id,
+      receiver: patientId,
+      text: 'Welcome to YourTherapist! 👋 I\'m here to help you on your mental health journey. Feel free to message me anytime.',
+    });
+    console.log(`✅ Welcome conversation created for patient ${patientId}`);
+  } catch (err) {
+    console.error('⚠️  Failed to create welcome conversation:', err.message);
+  }
+};
 
 const generateToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRE || '7d' });
@@ -117,6 +149,11 @@ export const verifyOTP = async (req, res, next) => {
     user.otpExpiry = undefined;
     user.lastLogin = new Date();
     await user.save();
+
+    // Auto-create welcome conversation for patients
+    if (user.role === 'patient') {
+      createWelcomeConversation(user._id);
+    }
 
     const token = generateToken(user._id);
 
@@ -280,6 +317,9 @@ export const googleLogin = async (req, res, next) => {
         role: 'patient',
         isVerified: true, // Google users are pre-verified
       });
+
+      // Auto-create welcome conversation for new Google patients
+      createWelcomeConversation(user._id);
     } else {
       user.lastLogin = new Date();
       if (!user.profilePic && picture) user.profilePic = picture;
@@ -385,3 +425,33 @@ export const resetPassword = async (req, res, next) => {
   }
 };
 
+// @desc    Change password (authenticated)
+// @route   PUT /api/auth/change-password
+export const changePassword = async (req, res, next) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ message: 'Current password and new password are required' });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ message: 'New password must be at least 6 characters' });
+    }
+
+    const user = await User.findById(req.user._id).select('+password');
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const isMatch = await user.comparePassword(currentPassword);
+    if (!isMatch) {
+      return res.status(400).json({ message: 'Current password is incorrect' });
+    }
+
+    user.password = newPassword;
+    await user.save();
+
+    res.json({ message: 'Password changed successfully!' });
+  } catch (error) {
+    next(error);
+  }
+};

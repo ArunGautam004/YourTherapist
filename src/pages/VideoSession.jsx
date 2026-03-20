@@ -159,8 +159,18 @@ const VideoSession = () => {
   useEffect(() => {
     const fetchAppointment = async () => {
       try {
-        if (roomId && roomId.length === 24) {
-          const { data } = await appointmentAPI.getById(roomId);
+        if (roomId) {
+          // roomId could be a 24-char MongoDB ObjectId or a UUID from meetingLink
+          let data;
+          if (roomId.length === 24 && /^[a-f0-9]{24}$/i.test(roomId)) {
+            // MongoDB ObjectId — fetch by ID
+            const res = await appointmentAPI.getById(roomId);
+            data = res.data.appointment || res.data;
+          } else {
+            // UUID from meetingLink — fetch by link
+            const res = await appointmentAPI.getByMeetingLink(roomId);
+            data = res.data.appointment || res.data;
+          }
           setAppointment(data);
         } else {
           setAppointment({ doctor: { name: 'Dr. Therapist' }, patient: { name: 'Patient' }, status: 'scheduled' });
@@ -948,15 +958,54 @@ const VideoSession = () => {
                           )}
 
                           {questions[currentQuestion].type === 'image' && (
-                            <div className="space-y-2">
-                              <input
-                                type="url"
-                                value={answers[questions[currentQuestion]._id || currentQuestion] || ''}
-                                onChange={(e) => setAnswers({ ...answers, [questions[currentQuestion]._id || currentQuestion]: e.target.value })}
-                                placeholder="Paste image URL..."
-                                className="w-full bg-gray-700 text-white placeholder:text-gray-500 px-4 py-3 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                              />
-                              <p className="text-xs text-gray-500">Provide a URL to the image</p>
+                            <div className="space-y-3">
+                              <div className="flex gap-2">
+                                <input
+                                  type="text"
+                                  value={answers[questions[currentQuestion]._id || currentQuestion] || ''}
+                                  onChange={(e) => setAnswers({ ...answers, [questions[currentQuestion]._id || currentQuestion]: e.target.value })}
+                                  placeholder="Image URL (or use Upload button)"
+                                  className="flex-1 bg-gray-700 text-white placeholder:text-gray-500 px-4 py-3 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => document.getElementById('questionnaire-image-upload')?.click()}
+                                  className="px-4 py-3 rounded-xl bg-primary text-white text-sm font-medium hover:bg-primary-dark transition-colors flex items-center gap-2 shrink-0"
+                                >
+                                  📷 Upload
+                                </button>
+                                <input
+                                  id="questionnaire-image-upload"
+                                  type="file"
+                                  accept="image/*"
+                                  className="hidden"
+                                  onChange={async (e) => {
+                                    const file = e.target.files?.[0];
+                                    if (!file) return;
+                                    if (file.size > 5 * 1024 * 1024) { toast.error('Image must be under 5MB'); return; }
+                                    const formData = new FormData();
+                                    formData.append('image', file);
+                                    try {
+                                      toast.loading('Uploading image...', { id: 'img-upload' });
+                                      const { data } = await (await import('../services/api')).uploadAPI.uploadImage(formData);
+                                      setAnswers(prev => ({ ...prev, [questions[currentQuestion]._id || currentQuestion]: data.url }));
+                                      toast.success('Image uploaded!', { id: 'img-upload' });
+                                    } catch {
+                                      toast.error('Upload failed', { id: 'img-upload' });
+                                    }
+                                    e.target.value = '';
+                                  }}
+                                />
+                              </div>
+                              {answers[questions[currentQuestion]._id || currentQuestion] && (
+                                <img
+                                  src={answers[questions[currentQuestion]._id || currentQuestion]}
+                                  alt="Uploaded"
+                                  className="max-h-32 rounded-xl object-contain bg-gray-700"
+                                  onError={(e) => { e.target.style.display = 'none'; }}
+                                />
+                              )}
+                              <p className="text-xs text-gray-500">Upload an image or paste a URL</p>
                             </div>
                           )}
                         </motion.div>

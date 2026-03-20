@@ -1,8 +1,8 @@
 import express from 'express';
 import {
   createAppointment, getAppointments, getAppointment,
-  updateAppointment, getTodayAppointments, getAvailableSlots,
-  verifyPayment,
+  getAppointmentByLink, updateAppointment, getTodayAppointments,
+  getAvailableSlots, verifyPayment,
 } from '../controllers/appointmentController.js';
 import { protect } from '../middleware/auth.js';
 
@@ -14,6 +14,7 @@ router.route('/').get(getAppointments).post(createAppointment);
 router.post('/verify-payment', verifyPayment);
 router.get('/today', getTodayAppointments);
 router.get('/slots/:doctorId/:date', getAvailableSlots);
+router.get('/by-link/:uuid', getAppointmentByLink);
 router.route('/:id').get(getAppointment).put(updateAppointment);
 
 export default router;

@@ -10,7 +10,7 @@ export const getPatients = async (req, res, next) => {
     const { search, riskLevel } = req.query;
 
     // Get unique patient IDs from appointments
-    const appointmentFilter = { doctor: req.user._id };
+    const appointmentFilter = { doctor: req.user._id, paymentStatus: 'paid' };
     const patientIds = await Appointment.distinct('patient', appointmentFilter);
 
     const userFilter = { _id: { $in: patientIds }, role: 'patient' };
@@ -26,7 +26,7 @@ export const getPatients = async (req, res, next) => {
         .sort({ date: -1 }).limit(1);
 
       const sessionCount = await Appointment.countDocuments({
-        patient: patient._id, doctor: req.user._id, status: { $ne: 'cancelled' }
+        patient: patient._id, doctor: req.user._id, paymentStatus: 'paid', status: { $ne: 'cancelled' }
       });
 
       const latestNote = await SessionNote.findOne({ patient: patient._id, doctor: req.user._id })
@@ -88,6 +88,7 @@ export const getPatientDetail = async (req, res, next) => {
     const appointments = await Appointment.find({
       patient: req.params.id,
       doctor: req.user._id,
+      paymentStatus: 'paid',
       status: { $ne: 'cancelled' }
     }).sort({ date: -1, time: -1 });
 
@@ -107,6 +108,46 @@ export const getPatientDetail = async (req, res, next) => {
   }
 };
 
+// @desc    Get ALL patients registered on the site (full info for doctor directory)
+// @route   GET /api/patients/all
+export const getAllPatientsOnSite = async (req, res, next) => {
+  try {
+    const { search } = req.query;
+    const filter = { role: 'patient' };
+    if (search) {
+      filter.name = { $regex: search, $options: 'i' };
+    }
+
+    const patients = await User.find(filter)
+      .select('name email phone profilePic gender dob address emergencyContact riskLevel diagnosis createdAt')
+      .sort({ createdAt: -1 });
+
+    // Enrich with session count and latest note for each patient
+    const enriched = await Promise.all(patients.map(async (pt) => {
+      const sessionCount = await Appointment.countDocuments({
+        patient: pt._id,
+        paymentStatus: 'paid',
+        status: { $ne: 'cancelled' },
+      });
+
+      const latestNote = await SessionNote.findOne({ patient: pt._id })
+        .sort({ createdAt: -1 })
+        .select('riskLevel diagnosis sessionDescription createdAt')
+        .lean();
+
+      return {
+        ...pt.toObject(),
+        sessionCount,
+        latestNote: latestNote || null,
+      };
+    }));
+
+    res.json({ patients: enriched });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // @desc    Get doctor analytics
 // @route   GET /api/patients/analytics
 export const getAnalytics = async (req, res, next) => {
@@ -115,10 +156,12 @@ export const getAnalytics = async (req, res, next) => {
 
     const totalPatients = await Appointment.distinct('patient', {
       doctor: doctorId,
+      paymentStatus: 'paid',
       status: { $nin: ['cancelled'] }
     });
     const totalSessions = await Appointment.countDocuments({
       doctor: doctorId,
+      paymentStatus: 'paid',
       status: { $nin: ['cancelled'] }
     });
 
@@ -205,6 +248,7 @@ export const getAnalytics = async (req, res, next) => {
 
     const completedSessionsCount = await Appointment.countDocuments({
       doctor: doctorId,
+      paymentStatus: 'paid',
       status: { $nin: ['cancelled'] },
       $or: [
         { status: 'completed' },
@@ -214,6 +258,7 @@ export const getAnalytics = async (req, res, next) => {
 
     const upcomingSessionsCount = await Appointment.countDocuments({
       doctor: doctorId,
+      paymentStatus: 'paid',
       status: { $nin: ['completed', 'cancelled'] },
       date: { $gte: todayEnd }
     });
@@ -231,7 +276,7 @@ export const getAnalytics = async (req, res, next) => {
         { $group: { _id: null, total: { $sum: '$fee' } } }
       ]);
       const dayOrders = await Appointment.countDocuments({
-        doctor: doctorId, status: { $nin: ['cancelled'] }, date: { $gte: d, $lt: nD }
+        doctor: doctorId, paymentStatus: 'paid', status: { $nin: ['cancelled'] }, date: { $gte: d, $lt: nD }
       });
 
       dailyData.push({
@@ -249,6 +294,7 @@ export const getAnalytics = async (req, res, next) => {
 
       const sessions = await Appointment.countDocuments({
         doctor: doctorId,
+        paymentStatus: 'paid',
         status: { $nin: ['cancelled'] },
         date: { $gte: startM, $lt: endM },
       });
@@ -260,6 +306,7 @@ export const getAnalytics = async (req, res, next) => {
 
       const patientsMonth = await Appointment.distinct('patient', {
         doctor: doctorId,
+        paymentStatus: 'paid',
         status: { $nin: ['cancelled'] },
         date: { $gte: startM, $lt: endM },
       });
