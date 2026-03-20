@@ -7,6 +7,35 @@ import { confirmationPatientEmail, confirmationDoctorEmail } from '../utils/emai
 import { createNotification } from '../controllers/notificationController.js';
 import { v4 as uuidv4 } from 'uuid';
 
+const IST_OFFSET_MINUTES = 330;
+
+const getISTDateParts = (date) => {
+  const shifted = new Date(date.getTime() + IST_OFFSET_MINUTES * 60000);
+  return {
+    year: shifted.getUTCFullYear(),
+    month: shifted.getUTCMonth(),
+    day: shifted.getUTCDate(),
+  };
+};
+
+const getISTDayBoundsInUTC = (date = new Date()) => {
+  const { year, month, day } = getISTDateParts(date);
+  const startUtcMs = Date.UTC(year, month, day) - IST_OFFSET_MINUTES * 60000;
+  const endUtcMs = Date.UTC(year, month, day + 1) - IST_OFFSET_MINUTES * 60000;
+  return { start: new Date(startUtcMs), end: new Date(endUtcMs) };
+};
+
+const getFrontendBaseUrl = () => {
+  const direct = process.env.FRONTEND_URL || process.env.CLIENT_URL;
+  if (direct) return direct;
+
+  if (process.env.VERCEL_URL) {
+    return `https://${process.env.VERCEL_URL}`;
+  }
+
+  return 'http://localhost:5173';
+};
+
 let _razorpay = null;
 function getRazorpay() {
   if (!_razorpay) {
@@ -139,7 +168,7 @@ export const verifyPayment = async (req, res, next) => {
       weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
     });
 
-    const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const baseUrl = getFrontendBaseUrl();
     const joinUrl = `${baseUrl}${appointment.meetingLink}`;
 
     const aptData = {
@@ -394,14 +423,11 @@ export const updateAppointment = async (req, res, next) => {
 // @route   GET /api/appointments/today
 export const getTodayAppointments = async (req, res, next) => {
   try {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
+    const { start, end } = getISTDayBoundsInUTC(new Date());
 
     const appointments = await Appointment.find({
       doctor: req.user._id,
-      date: { $gte: today, $lt: tomorrow },
+      date: { $gte: start, $lt: end },
       status: { $nin: ['cancelled'] },
       paymentStatus: 'paid',
     })

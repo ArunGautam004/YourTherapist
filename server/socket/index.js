@@ -2,6 +2,30 @@ import Message from '../models/Message.js';
 import Appointment from '../models/Appointment.js';
 import { createNotification } from '../controllers/notificationController.js';
 
+const IST_OFFSET_MINUTES = 330;
+
+const getISTDateParts = (date) => {
+  const shifted = new Date(date.getTime() + IST_OFFSET_MINUTES * 60000);
+  return {
+    year: shifted.getUTCFullYear(),
+    month: shifted.getUTCMonth(),
+    day: shifted.getUTCDate(),
+  };
+};
+
+const buildAppointmentDateTimeIST = (dateValue, timeValue) => {
+  const baseDate = new Date(dateValue);
+  const { year, month, day } = getISTDateParts(baseDate);
+
+  const [tPart, tPeriod] = (timeValue || '12:00 PM').split(' ');
+  let [tH, tM] = (tPart || '12:00').split(':').map(Number);
+  if (tPeriod === 'PM' && tH !== 12) tH += 12;
+  if (tPeriod === 'AM' && tH === 12) tH = 0;
+
+  const utcMs = Date.UTC(year, month, day, tH || 0, tM || 0) - IST_OFFSET_MINUTES * 60000;
+  return new Date(utcMs);
+};
+
 const onlineUsers = new Map(); // userId -> socketId
 const roomsMap = new Map();    // roomId -> { doctorId, patientId, participants }
 
@@ -45,12 +69,7 @@ const initSocket = (io) => {
       try {
         const apt = await Appointment.findOne({ meetingLink: `/session/${roomId}`, paymentStatus: 'paid' });
         if (apt) {
-          const aptDate = new Date(apt.date);
-          const [tPart, tPeriod] = (apt.time || '').split(' ');
-          let [tH, tM] = (tPart || '0:0').split(':').map(Number);
-          if (tPeriod === 'PM' && tH !== 12) tH += 12;
-          if (tPeriod === 'AM' && tH === 12) tH = 0;
-          aptDate.setHours(tH, tM || 0, 0, 0);
+          const aptDate = buildAppointmentDateTimeIST(apt.date, apt.time);
 
           const endTime = new Date(aptDate.getTime() + (apt.duration || 50) * 60000);
           const now = new Date();

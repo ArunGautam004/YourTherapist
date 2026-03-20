@@ -3,6 +3,17 @@ import { sendEmail } from '../utils/sendEmail.js';
 import { reminderEmail } from '../utils/emailTemplates.js';
 import { createNotification } from '../controllers/notificationController.js';
 
+const getFrontendBaseUrl = () => {
+  const direct = process.env.FRONTEND_URL || process.env.CLIENT_URL;
+  if (direct) return direct;
+
+  if (process.env.VERCEL_URL) {
+    return `https://${process.env.VERCEL_URL}`;
+  }
+
+  return 'http://localhost:5173';
+};
+
 /**
  * Call startReminderScheduler(io) once after DB connects in server.js.
  *
@@ -48,7 +59,7 @@ export const startReminderScheduler = (io) => {
 
         if (aptDate < windowStart || aptDate > windowEnd) continue;
 
-        const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+        const baseUrl = getFrontendBaseUrl();
         const joinUrl  = `${baseUrl}${apt.meetingLink}`;
 
         const dateStr = new Date(apt.date).toLocaleDateString('en-IN', {
