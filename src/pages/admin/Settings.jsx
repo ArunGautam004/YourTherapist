@@ -60,7 +60,7 @@ const AdminSettings = () => {
                 license: user.license || '',
                 experience: user.experience || 0,
                 bio: user.bio || '',
-                consultationFee: user.consultationFee || 1500,
+                consultationFee: user.consultationFee ?? 1500,
             });
         }
         messageAPI.getConversations().then(({ data }) => {

@@ -179,7 +179,7 @@ const BookAppointment = () => {
     }
   };
 
-  const fee = doctorInfo?.consultationFee || 1500;
+  const fee = doctorInfo?.consultationFee ?? 1500;
 
   return (
     <div className="min-h-screen bg-background">
