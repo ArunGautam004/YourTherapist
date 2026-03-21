@@ -26,6 +26,19 @@ const getISTDayBoundsInUTC = (date = new Date()) => {
   return { start: new Date(startUtcMs), end: new Date(endUtcMs) };
 };
 
+const buildAppointmentDateTimeIST = (dateValue, timeValue) => {
+  const baseDate = new Date(dateValue);
+  const { year, month, day } = getISTDateParts(baseDate);
+
+  const [timePart, period] = (timeValue || '12:00 PM').split(' ');
+  let [h, m] = (timePart || '12:00').split(':').map(Number);
+  if (period === 'PM' && h !== 12) h += 12;
+  if (period === 'AM' && h === 12) h = 0;
+
+  const utcMs = Date.UTC(year, month, day, h || 0, m || 0) - IST_OFFSET_MINUTES * 60000;
+  return new Date(utcMs);
+};
+
 const getFrontendBaseUrl = () => {
   const direct = process.env.FRONTEND_URL || process.env.CLIENT_URL;
   if (direct) return direct;
@@ -174,16 +187,7 @@ const finalizeAppointmentConfirmation = async (appointment, req) => {
 
   try {
     const now = new Date();
-    const appointmentDateTime = new Date(populatedAppointment.date);
-    const parseTime = (timeStr) => {
-      const [time, period] = timeStr.split(' ');
-      let [h, m] = time.split(':').map(Number);
-      if (period === 'PM' && h !== 12) h += 12;
-      if (period === 'AM' && h === 12) h = 0;
-      return { h, m };
-    };
-    const { h, m } = parseTime(populatedAppointment.time);
-    appointmentDateTime.setHours(h, m, 0, 0);
+    const appointmentDateTime = buildAppointmentDateTimeIST(populatedAppointment.date, populatedAppointment.time);
     const minutesUntil = (appointmentDateTime - now) / 60000;
 
     if (minutesUntil > 0 && minutesUntil <= 30) {
