@@ -72,7 +72,6 @@ const AdminCalendar = () => {
   const [showAvailability, setShowAvailability] = useState(false);
   const [slots, setSlots] = useState(defaultSlots);
   const [savingSlots, setSavingSlots] = useState(false);
-  const [consultationFee, setConsultationFee] = useState(1500);
 
   // Popover state for clicked appointment
   const [popover, setPopover] = useState(null); // { apt, x, y }
@@ -94,7 +93,6 @@ const AdminCalendar = () => {
       });
       setSlots(merged);
     }
-    if (user?.consultationFee) setConsultationFee(user.consultationFee);
   }, [user]);
 
   useEffect(() => {
@@ -190,9 +188,9 @@ const AdminCalendar = () => {
       const availableSlots = slots
         .filter(s => s.enabled)
         .map(({ day, startTime, endTime }) => ({ day, startTime, endTime }));
-      const { data } = await authAPI.updateProfile({ availableSlots, consultationFee });
+      const { data } = await authAPI.updateProfile({ availableSlots });
       if (data.user) updateUser(data.user);
-      toast.success('Availability and fees updated! ✅');
+      toast.success('Availability updated! ✅');
       setShowAvailability(false);
     } catch (err) {
       toast.error('Failed to save availability');
@@ -486,21 +484,6 @@ const AdminCalendar = () => {
               </div>
 
               <div className="p-6 space-y-5">
-                {/* Fees */}
-                <div>
-                  <p className="text-sm font-semibold text-text-primary mb-3">Consultation Fee</p>
-                  <div>
-                    <label className="block text-xs font-medium text-text-secondary mb-1">Video Session Fee (₹)</label>
-                    <input
-                      type="number"
-                      value={consultationFee}
-                      onChange={(e) => setConsultationFee(Number(e.target.value))}
-                      className="input-field !py-2"
-                      min="0"
-                    />
-                  </div>
-                </div>
-
                 {/* Quick presets */}
                 <div>
                   <p className="text-sm font-semibold text-text-primary mb-2">Quick Presets</p>

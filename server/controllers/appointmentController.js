@@ -457,7 +457,7 @@ export const getAvailableSlots = async (req, res, next) => {
     const doctor = await User.findById(doctorId);
     if (!doctor) return res.status(404).json({ message: 'Doctor not found' });
 
-    const doctorProfile = await DoctorProfile.findOne({ user: doctorId }).select('availableSlots');
+    const doctorProfile = await DoctorProfile.findOne({ user: doctorId }).select('availableSlots consultationFee chatFee');
 
     // Parse date as local calendar day to avoid UTC offset drift.
     const [year, month, day] = date.split('-').map(Number);
@@ -482,7 +482,15 @@ export const getAvailableSlots = async (req, res, next) => {
       return expanded === requestedDay;
     });
     if (!dayAvailability) {
-      return res.json({ slots: [] });
+      return res.json({
+        slots: [],
+        doctor: {
+          _id: doctor._id,
+          name: doctor.name,
+          consultationFee: doctorProfile?.consultationFee ?? doctor.consultationFee,
+          chatFee: doctorProfile?.chatFee ?? doctor.chatFee,
+        },
+      });
     }
 
     const allSlots = generateTimeSlots(dayAvailability.startTime, dayAvailability.endTime);
@@ -502,7 +510,15 @@ export const getAvailableSlots = async (req, res, next) => {
     const bookedTimes = new Set(booked.map(a => a.time));
     const availableSlots = allSlots.filter(slot => !bookedTimes.has(slot));
 
-    res.json({ slots: availableSlots });
+    res.json({
+      slots: availableSlots,
+      doctor: {
+        _id: doctor._id,
+        name: doctor.name,
+        consultationFee: doctorProfile?.consultationFee ?? doctor.consultationFee,
+        chatFee: doctorProfile?.chatFee ?? doctor.chatFee,
+      },
+    });
   } catch (error) {
     next(error);
   }
