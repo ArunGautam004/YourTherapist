@@ -76,6 +76,16 @@
   }
 }
 
+@media (min-width: 768px) and (max-width: 1024px) {
+  .card {
+    @apply p-5;
+  }
+
+  .section-heading {
+    @apply text-4xl;
+  }
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 6px;

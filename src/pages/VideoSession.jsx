@@ -12,12 +12,43 @@ import { useAuth } from '../context/AuthContext';
 import { getSocket } from '../services/socket';
 import { appointmentAPI, sessionAPI } from '../services/api';
 
-const servers = {
-  iceServers: [
-    { urls: ['stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'] },
-    { urls: ['stun:stun3.l.google.com:19302', 'stun:stun4.l.google.com:19302'] },
-  ]
+const buildRtcConfig = () => {
+  const defaultStunUrls = [
+    'stun:stun1.l.google.com:19302',
+    'stun:stun2.l.google.com:19302',
+    'stun:stun3.l.google.com:19302',
+    'stun:stun4.l.google.com:19302',
+  ];
+
+  const stunUrls = (import.meta.env.VITE_STUN_URLS || defaultStunUrls.join(','))
+    .split(',')
+    .map(url => url.trim())
+    .filter(Boolean);
+
+  const turnUrls = (import.meta.env.VITE_TURN_URLS || '')
+    .split(',')
+    .map(url => url.trim())
+    .filter(Boolean);
+
+  const turnUsername = import.meta.env.VITE_TURN_USERNAME;
+  const turnCredential = import.meta.env.VITE_TURN_CREDENTIAL;
+
+  const iceServers = [{ urls: stunUrls }];
+  if (turnUrls.length && turnUsername && turnCredential) {
+    iceServers.push({
+      urls: turnUrls,
+      username: turnUsername,
+      credential: turnCredential,
+    });
+  }
+
+  return {
+    iceServers,
+    iceCandidatePoolSize: 10,
+  };
 };
+
+const servers = buildRtcConfig();
 
 // Avatar shown when camera is off or while connecting
 const ParticipantAvatar = ({ name, role, profilePic, size = 'large' }) => {
@@ -151,6 +182,7 @@ const VideoSession = () => {
   const localStream = useRef(null);
   const pendingCandidates = useRef([]);
   const isOfferSent = useRef(false);
+  const didRetryIce = useRef(false);
 
   // Screen Share state
   const [isScreenSharing, setIsScreenSharing] = useState(false);
@@ -267,6 +299,7 @@ const VideoSession = () => {
     const pc = new RTCPeerConnection(servers);
     peerConnection.current = pc;
     isOfferSent.current = false;
+    didRetryIce.current = false;
 
     if (localStream.current) {
       localStream.current.getTracks().forEach(track => {
@@ -290,8 +323,24 @@ const VideoSession = () => {
     pc.onconnectionstatechange = () => {
       if (pc.connectionState === 'connected') {
         setIsRemoteVideoActive(true);
+        didRetryIce.current = false;
       } else if (['disconnected', 'failed', 'closed'].includes(pc.connectionState)) {
         setIsRemoteVideoActive(false);
+      }
+    };
+
+    pc.oniceconnectionstatechange = async () => {
+      if (pc.iceConnectionState !== 'failed' || didRetryIce.current) return;
+      const isDoctor = user?.role === 'doctor' || user?.role === 'admin';
+      if (!isDoctor) return;
+
+      didRetryIce.current = true;
+      try {
+        const restartOffer = await pc.createOffer({ iceRestart: true });
+        await pc.setLocalDescription(restartOffer);
+        socket.emit('call:offer', { roomId: signalRoomId, offer: restartOffer });
+      } catch (err) {
+        console.warn('[WebRTC] ICE restart failed:', err);
       }
     };
 
@@ -510,22 +559,30 @@ const VideoSession = () => {
       const templateId = activeTemplateIdRef.current || activeTemplateId;
       const apt = appointmentRef.current || appointment;
 
-      if (isPatient && templateId && apt?._id && apt?.doctor?._id) {
+      if (isPatient && templateId && apt?._id && (apt?.doctor?._id || apt?.doctor)) {
+        const normalizeResponseType = (type) => {
+          if (type === 'scale') return 'scale';
+          if (type === 'choice' || type === 'objective') return 'choice';
+          if (type === 'text' || type === 'subjective' || type === 'image') return 'text';
+          return 'text';
+        };
+
         // ✅ FIX 2: answers keys are question._id OR numeric index — map consistently
         const formattedResponses = questions.map((q, idx) => {
           const key = q._id || idx; // same key used when setting answers
           return {
             questionId: q._id || String(idx),
             questionText: q.text || `Question ${idx + 1}`,
-            type: q.type || 'text',
+            type: normalizeResponseType(q.type),
             answer: answers[key] ?? '',
           };
         });
 
+        const doctorId = apt?.doctor?._id || apt?.doctor;
         await sessionAPI.submitResponse({
           templateId,
           appointmentId: apt._id,   // ✅ FIX 3: real MongoDB _id, not roomId URL param
-          doctorId: apt.doctor._id,
+          doctorId,
           responses: formattedResponses,
         });
         toast.success('Responses saved!');

@@ -103,6 +103,10 @@ export default function NotificationBell() {
     return `${days}d ago`;
   };
 
+  const sanitizeNotificationText = (text = '') => {
+    return String(text).replace(/\bDr\.\s+Dr\.\s+/gi, 'Dr. ');
+  };
+
   return (
     <div className="relative" ref={ref}>
       {/* Bell button */}
@@ -180,10 +184,10 @@ export default function NotificationBell() {
                     {/* Content */}
                     <div className="flex-1 min-w-0">
                       <p className={`text-sm leading-snug ${!notif.read ? 'font-semibold text-text-primary' : 'font-medium text-text-secondary'}`}>
-                        {notif.title}
+                        {sanitizeNotificationText(notif.title)}
                       </p>
                       <p className="text-xs text-text-secondary mt-0.5 leading-snug line-clamp-2">
-                        {notif.message}
+                        {sanitizeNotificationText(notif.message)}
                       </p>
                       <p className="text-[10px] text-gray-400 mt-1">{timeAgo(notif.createdAt)}</p>
                     </div>

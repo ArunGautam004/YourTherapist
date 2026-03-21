@@ -36,6 +36,11 @@ const getFrontendBaseUrl = () => {
   return 'http://localhost:5173';
 };
 
+const formatDoctorLabel = (name = '') => {
+  const cleanName = String(name).replace(/^dr\.?\s*/i, '').trim();
+  return `Dr. ${cleanName}`;
+};
+
 let _razorpay = null;
 function getRazorpay() {
   if (!_razorpay) {
@@ -204,9 +209,7 @@ export const verifyPayment = async (req, res, next) => {
 
     try {
       const Message = (await import('../models/Message.js')).default;
-      const doctorLabel = appointment.doctor.name.startsWith('Dr.')
-        ? appointment.doctor.name
-        : `Dr. ${appointment.doctor.name}`;
+      const doctorLabel = formatDoctorLabel(appointment.doctor.name);
 
       await Message.create({
         sender: appointment.doctor._id,
@@ -232,7 +235,7 @@ export const verifyPayment = async (req, res, next) => {
         userId: appointment.patient._id,
         type: 'appointment_confirmed',
         title: '✅ Appointment Confirmed',
-        message: `Your appointment with Dr. ${appointment.doctor.name} on ${dateStr} at ${appointment.time} is confirmed.`,
+        message: `Your appointment with ${formatDoctorLabel(appointment.doctor.name)} on ${dateStr} at ${appointment.time} is confirmed.`,
         link: '/patient/sessions',   // ✅ opens My Sessions, NOT the meeting link
         meta: { appointmentId: appointment._id },
       });
@@ -272,7 +275,7 @@ export const verifyPayment = async (req, res, next) => {
           await sendEmail({
             to: appointment.patient.email,
             subject: '⏰ Your Session Starts Soon!',
-            htmlContent: `<p>Hi ${appointment.patient.name}, your session with Dr. ${appointment.doctor.name} starts in ${Math.round(minutesUntil)} minutes. <a href="${joinUrl}">Join here</a></p>`,
+            htmlContent: `<p>Hi ${appointment.patient.name}, your session with ${formatDoctorLabel(appointment.doctor.name)} starts in ${Math.round(minutesUntil)} minutes. <a href="${joinUrl}">Join here</a></p>`,
           });
         } catch (e) {
           console.error('Immediate reminder email failed:', e.message);
@@ -282,7 +285,7 @@ export const verifyPayment = async (req, res, next) => {
           userId: appointment.patient._id,
           type: 'appointment_reminder',
           title: '🎥 Your Session is Starting Now',
-          message: `Your session with Dr. ${appointment.doctor.name} is starting. Join now!`,
+          message: `Your session with ${formatDoctorLabel(appointment.doctor.name)} is starting. Join now!`,
           link: appointment.meetingLink,
           meta: { appointmentId: appointment._id, joinUrl },
         });

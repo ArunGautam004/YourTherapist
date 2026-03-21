@@ -4,7 +4,7 @@ const responseSchema = new mongoose.Schema({
   questionId: { type: String, required: true },
   questionText: { type: String, required: true },
   answer: { type: mongoose.Schema.Types.Mixed, required: true },
-  type: { type: String, enum: ['scale', 'choice', 'text'] },
+  type: { type: String, enum: ['scale', 'choice', 'text', 'objective', 'subjective', 'image'] },
 });
 
 const questionnaireResponseSchema = new mongoose.Schema({

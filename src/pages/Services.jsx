@@ -1,20 +1,25 @@
 import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import {
-  Video, MessageCircle, Brain, Shield, BarChart3, Users, HeartPulse, Smile,
-  ArrowRight, Sparkles, CheckCircle2, Calendar
+  ArrowRight,
+  BarChart3,
+  Brain,
+  Calendar,
+  CheckCircle2,
+  HeartPulse,
+  MessageCircle,
+  Shield,
+  Smile,
+  Sparkles,
+  Users,
+  Video,
 } from 'lucide-react';
 import Navbar from '../components/layout/Navbar';
 import Footer from '../components/layout/Footer';
 
 const fadeInUp = {
-  hidden: { opacity: 0, y: 30 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.6 } },
-};
-
-const staggerContainer = {
-  hidden: {},
-  visible: { transition: { staggerChildren: 0.12 } },
+  hidden: { opacity: 0, y: 20 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.5 } },
 };
 
 const Services = () => {
@@ -22,147 +27,180 @@ const Services = () => {
     {
       icon: HeartPulse,
       title: 'Individual Therapy',
-      desc: 'One-on-one confidential sessions with a licensed psychologist to address anxiety, depression, stress, PTSD, grief, and more.',
-      features: ['Cognitive Behavioral Therapy (CBT)', 'Mindfulness-Based Therapy', 'Trauma Processing', 'Personalized treatment plans'],
+      summary: 'One-to-one sessions focused on anxiety, emotional stress, and life transitions.',
+      bullets: ['Goal setting and case planning', 'CBT-informed interventions', 'Ongoing progress review'],
       color: 'from-rose-500 to-pink-400',
     },
     {
       icon: Users,
-      title: 'Couples Therapy',
-      desc: 'Strengthen your relationship through guided therapy. Address communication issues, conflict resolution, and emotional intimacy.',
-      features: ['Relationship assessment', 'Communication coaching', 'Conflict resolution', 'Trust rebuilding'],
+      title: 'Couples Counseling',
+      summary: 'Structured sessions for communication repair, trust, and conflict resolution.',
+      bullets: ['Relational assessment', 'Communication frameworks', 'Joint action plans'],
       color: 'from-primary to-emerald-400',
     },
     {
       icon: Brain,
-      title: 'Anxiety & Depression',
-      desc: 'Specialized treatment for anxiety disorders and depression. Evidence-based approaches tailored to your unique experience.',
-      features: ['Panic disorder treatment', 'Social anxiety support', 'Major depression therapy', 'Mood regulation strategies'],
+      title: 'Anxiety and Depression Care',
+      summary: 'Targeted support with evidence-informed methods and practical coping tools.',
+      bullets: ['Symptom tracking', 'Thought pattern restructuring', 'Routine stabilization'],
       color: 'from-blue-500 to-cyan-400',
     },
     {
       icon: Smile,
       title: 'Stress Management',
-      desc: 'Learn practical techniques to manage daily stress, improve work-life balance, and build emotional resilience.',
-      features: ['Relaxation techniques', 'Work-life balance strategies', 'Burnout prevention', 'Resilience building'],
+      summary: 'Workload, burnout, and emotional resilience support for modern routines.',
+      bullets: ['Nervous-system regulation', 'Daily stress protocols', 'Energy management'],
       color: 'from-amber-500 to-orange-400',
     },
     {
       icon: Video,
       title: 'Video Consultations',
-      desc: 'Secure, high-quality video sessions from the comfort of your home. All sessions are encrypted end-to-end.',
-      features: ['HD video & audio', 'End-to-end encryption', 'Screen sharing support', 'Session recording (with consent)'],
-      color: 'from-indigo-500 to-purple-400',
+      summary: 'Private HD telehealth sessions that work in-browser across all major devices.',
+      bullets: ['Encrypted calls', 'Low-friction session join', 'Live collaboration tools'],
+      color: 'from-indigo-500 to-violet-400',
     },
     {
       icon: MessageCircle,
-      title: 'Chat Sessions',
-      desc: 'Text-based therapy for those who prefer written communication. All conversations are fully private and secure.',
-      features: ['Real-time messaging', 'Async communication', 'Private & encrypted', 'Share media & documents'],
-      color: 'from-pink-500 to-rose-400',
+      title: 'Secure Chat Support',
+      summary: 'Maintain continuity of care between sessions through secure messaging.',
+      bullets: ['Asynchronous follow-up', 'Quick therapist guidance', 'Confidential communication'],
+      color: 'from-fuchsia-500 to-rose-400',
     },
   ];
 
   const tools = [
-    { icon: Calendar, title: 'Easy Scheduling', desc: 'Book sessions in a few clicks. Automated reminders keep you on track.' },
-    { icon: BarChart3, title: 'Progress Tracking', desc: 'Visualize your mental health journey with detailed charts and mood logs.' },
-    { icon: Shield, title: 'Mood Journal', desc: 'Daily self-reflection tool to track your emotional patterns and triggers.' },
+    {
+      icon: Calendar,
+      title: 'Smart Scheduling',
+      desc: 'Faster booking with reminders and session access in one place.',
+    },
+    {
+      icon: BarChart3,
+      title: 'Progress Monitoring',
+      desc: 'Understand treatment progress through clear mood and response trends.',
+    },
+    {
+      icon: Shield,
+      title: 'Clinical Privacy',
+      desc: 'Security-first design for sensitive conversations and records.',
+    },
   ];
 
   return (
     <div className="min-h-screen bg-background">
       <Navbar />
 
-      {/* Hero */}
-      <section className="pt-28 pb-16 md:pt-36 md:pb-24 relative overflow-hidden">
+      <section className="relative pt-28 pb-14 md:pt-34 md:pb-18 lg:pt-40 lg:pb-24 overflow-hidden">
         <div className="absolute inset-0 -z-10">
-          <div className="absolute top-20 left-20 w-72 h-72 bg-secondary/5 rounded-full blur-3xl animate-pulse-soft" />
-          <div className="absolute bottom-10 right-10 w-96 h-96 bg-primary/5 rounded-full blur-3xl" />
+          <div className="absolute top-8 left-0 w-80 h-80 rounded-full bg-secondary/10 blur-3xl" />
+          <div className="absolute -bottom-6 right-0 w-96 h-96 rounded-full bg-primary/10 blur-3xl" />
         </div>
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-          <motion.div initial="hidden" animate="visible" variants={staggerContainer}>
-            <motion.div variants={fadeInUp} className="inline-flex items-center gap-2 bg-secondary-light px-4 py-2 rounded-full mb-6">
-              <Sparkles className="w-4 h-4 text-secondary" />
-              <span className="text-sm font-medium text-secondary">Our Services</span>
-            </motion.div>
-            <motion.h1 variants={fadeInUp} className="font-display text-4xl sm:text-5xl font-bold text-text-primary leading-tight">
-              Comprehensive <span className="gradient-text">Mental Health</span> Services
-            </motion.h1>
-            <motion.p variants={fadeInUp} className="mt-6 text-lg text-text-secondary max-w-2xl mx-auto">
-              Evidence-based therapy services designed to support your mental health journey, 
-              delivered by licensed professionals through our secure platform.
-            </motion.p>
-          </motion.div>
+
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+          <motion.p
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="inline-flex items-center gap-2 rounded-full bg-secondary-light px-4 py-2 text-sm font-semibold text-secondary"
+          >
+            <Sparkles className="w-4 h-4" />
+            Services
+          </motion.p>
+          <motion.h1
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mt-4 font-display text-4xl sm:text-5xl font-bold text-text-primary leading-tight"
+          >
+            Therapy Services Built for
+            <span className="gradient-text"> Continuity and Results</span>
+          </motion.h1>
+          <motion.p
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mt-5 text-base sm:text-lg text-text-secondary leading-relaxed max-w-3xl mx-auto"
+          >
+            Choose a care model that fits your goals and schedule, then track your outcomes with integrated clinical tools.
+          </motion.p>
         </div>
       </section>
 
-      {/* Services Grid */}
-      <section className="py-16 md:py-24">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-          <motion.div initial="hidden" whileInView="visible" viewport={{ once: true }} variants={staggerContainer} className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {services.map((s) => (
-              <motion.div key={s.title} variants={fadeInUp} className="card group hover:-translate-y-1">
-                <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${s.color} flex items-center justify-center mb-5 shadow-soft group-hover:shadow-soft-lg transition-all`}>
-                  <s.icon className="w-7 h-7 text-white" />
+      <section className="pb-14 md:pb-18 lg:pb-24">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-5 md:gap-6">
+            {services.map((service) => (
+              <motion.div
+                key={service.title}
+                initial="hidden"
+                whileInView="visible"
+                viewport={{ once: true }}
+                variants={fadeInUp}
+                className="card"
+              >
+                <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br ${service.color} flex items-center justify-center mb-4`}>
+                  <service.icon className="w-6 h-6 text-white" />
                 </div>
-                <h3 className="font-display font-bold text-xl text-text-primary mb-2">{s.title}</h3>
-                <p className="text-text-secondary text-sm leading-relaxed mb-4">{s.desc}</p>
-                <ul className="space-y-2">
-                  {s.features.map((f) => (
-                    <li key={f} className="flex items-center gap-2 text-sm text-text-secondary">
+                <h3 className="font-display text-xl font-bold text-text-primary">{service.title}</h3>
+                <p className="mt-2 text-sm text-text-secondary leading-relaxed">{service.summary}</p>
+                <ul className="mt-4 space-y-2">
+                  {service.bullets.map((item) => (
+                    <li key={item} className="flex items-center gap-2 text-sm text-text-secondary">
                       <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0" />
-                      {f}
+                      {item}
                     </li>
                   ))}
                 </ul>
               </motion.div>
             ))}
-          </motion.div>
+          </div>
         </div>
       </section>
 
-      {/* Self-Help Tools */}
-      <section className="py-16 md:py-24 bg-gradient-to-b from-primary-light/30 to-transparent">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-          <motion.div initial="hidden" whileInView="visible" viewport={{ once: true }} variants={staggerContainer} className="text-center mb-12">
-            <motion.h2 variants={fadeInUp} className="section-heading">
-              Self-Help <span className="gradient-text">Tools</span>
-            </motion.h2>
-            <motion.p variants={fadeInUp} className="mt-4 text-text-secondary max-w-xl mx-auto">
-              Complement your therapy sessions with our built-in tools.
-            </motion.p>
-          </motion.div>
-          <motion.div initial="hidden" whileInView="visible" viewport={{ once: true }} variants={staggerContainer} className="grid md:grid-cols-3 gap-6">
-            {tools.map((t) => (
-              <motion.div key={t.title} variants={fadeInUp} className="card text-center group hover:-translate-y-1">
-                <t.icon className="w-10 h-10 text-primary mx-auto mb-4" />
-                <h3 className="font-display font-bold text-lg text-text-primary mb-2">{t.title}</h3>
-                <p className="text-sm text-text-secondary">{t.desc}</p>
+      <section className="py-14 md:py-18 lg:py-24 bg-gradient-to-b from-primary-light/35 to-transparent">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center">
+            <h2 className="section-heading">Platform Support Tools</h2>
+            <p className="mt-3 text-text-secondary max-w-2xl mx-auto">
+              Clinical sessions are strengthened by scheduling, follow-up, and progress visibility.
+            </p>
+          </div>
+
+          <div className="mt-9 grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+            {tools.map((tool) => (
+              <motion.div
+                key={tool.title}
+                initial="hidden"
+                whileInView="visible"
+                viewport={{ once: true }}
+                variants={fadeInUp}
+                className="card text-center"
+              >
+                <tool.icon className="w-10 h-10 text-primary mx-auto" />
+                <h3 className="mt-4 font-display text-lg font-bold text-text-primary">{tool.title}</h3>
+                <p className="mt-2 text-sm text-text-secondary">{tool.desc}</p>
               </motion.div>
             ))}
-          </motion.div>
+          </div>
         </div>
       </section>
 
-      {/* CTA */}
-      <section className="py-16 md:py-24">
+      <section className="py-14 md:py-18 lg:py-24">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <motion.div initial="hidden" whileInView="visible" viewport={{ once: true }} variants={fadeInUp}
-            className="rounded-[2rem] bg-gradient-to-br from-primary via-primary-dark to-secondary p-12 md:p-16 text-center relative overflow-hidden"
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            className="rounded-[2rem] bg-gradient-to-br from-primary via-primary-dark to-secondary p-8 sm:p-10 md:p-14 text-center text-white"
           >
-            <div className="absolute inset-0 opacity-10">
-              <div className="absolute top-10 left-10 w-32 h-32 border-2 border-white rounded-full" />
-              <div className="absolute bottom-10 right-10 w-48 h-48 border-2 border-white rounded-full" />
-            </div>
-            <div className="relative z-10">
-              <h2 className="font-display text-3xl md:text-4xl font-bold text-white mb-4">
-                Ready to Book Your First Session?
-              </h2>
-              <p className="text-white/80 text-lg max-w-xl mx-auto mb-8">
-                Start with a brief assessment and we'll match you with the right approach.
-              </p>
-              <Link to="/register" className="bg-white text-primary font-semibold px-8 py-4 rounded-2xl hover:bg-gray-50 transition-all shadow-soft-lg inline-flex items-center gap-2">
-                Get Started Free <ArrowRight className="w-5 h-5" />
+            <h2 className="font-display text-3xl md:text-4xl font-bold">Start with a Session That Fits You</h2>
+            <p className="mt-3 text-white/80 max-w-2xl mx-auto">
+              Begin with secure onboarding and schedule your first consultation in minutes.
+            </p>
+            <div className="mt-7 flex flex-col sm:flex-row justify-center gap-3">
+              <Link to="/register" className="bg-white text-primary px-7 py-3.5 rounded-2xl font-semibold hover:bg-gray-100 transition-colors inline-flex items-center justify-center gap-2">
+                Book First Session
+                <ArrowRight className="w-4 h-4" />
+              </Link>
+              <Link to="/contact" className="border border-white/45 px-7 py-3.5 rounded-2xl font-semibold hover:bg-white/10 transition-colors">
+                Talk to Team
               </Link>
             </div>
           </motion.div>

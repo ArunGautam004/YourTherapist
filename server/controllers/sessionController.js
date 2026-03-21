@@ -2,6 +2,7 @@ import SessionNote from '../models/SessionNote.js';
 import QuestionnaireTemplate from '../models/QuestionnaireTemplate.js';
 import QuestionnaireResponse from '../models/QuestionnaireResponse.js';
 import Appointment from '../models/Appointment.js';
+import mongoose from 'mongoose';
 
 // ========== SESSION NOTES ==========
 
@@ -152,18 +153,54 @@ export const submitQuestionnaireResponse = async (req, res, next) => {
   try {
     const { templateId, appointmentId, responses, doctorId } = req.body;
 
-    // Guard: appointmentId must be a valid 24-char MongoDB ObjectId
-    if (!appointmentId || appointmentId.length !== 24) {
+    if (!appointmentId || !mongoose.Types.ObjectId.isValid(appointmentId)) {
       return res.status(400).json({
         message: 'Invalid appointmentId. Must be the MongoDB _id of the appointment, not the meeting room URL.',
       });
+    }
+    if (!templateId || !mongoose.Types.ObjectId.isValid(templateId)) {
+      return res.status(400).json({ message: 'Invalid templateId' });
     }
     if (!templateId || !responses?.length) {
       return res.status(400).json({ message: 'templateId and responses are required' });
     }
 
+    const appointment = await Appointment.findById(appointmentId).select('doctor patient');
+    if (!appointment) {
+      return res.status(404).json({ message: 'Appointment not found' });
+    }
+
+    if (
+      req.user.role === 'patient' &&
+      appointment.patient?.toString() !== req.user._id.toString()
+    ) {
+      return res.status(403).json({ message: 'You can only submit responses for your own appointment' });
+    }
+
+    const normalizeResponseType = (type) => {
+      if (type === 'scale') return 'scale';
+      if (type === 'choice' || type === 'objective') return 'choice';
+      if (type === 'text' || type === 'subjective' || type === 'image') return 'text';
+      return 'text';
+    };
+
+    const normalizedResponses = responses.map((r, index) => ({
+      questionId: String(r.questionId ?? index),
+      questionText: r.questionText || `Question ${index + 1}`,
+      type: normalizeResponseType(r.type),
+      answer: r.answer ?? '',
+    }));
+
+    const resolvedDoctorId = mongoose.Types.ObjectId.isValid(doctorId)
+      ? doctorId
+      : appointment.doctor?.toString();
+
+    if (!resolvedDoctorId || !mongoose.Types.ObjectId.isValid(resolvedDoctorId)) {
+      return res.status(400).json({ message: 'Valid doctorId is required' });
+    }
+
     let totalScore = 0;
-    responses.forEach(r => {
+    normalizedResponses.forEach(r => {
       if (r.type === 'scale' && !isNaN(r.answer)) {
         totalScore += parseInt(r.answer);
       }
@@ -180,7 +217,7 @@ export const submitQuestionnaireResponse = async (req, res, next) => {
     if (existing) {
       response = await QuestionnaireResponse.findByIdAndUpdate(
         existing._id,
-        { responses, totalScore, doctor: doctorId },
+        { responses: normalizedResponses, totalScore, doctor: resolvedDoctorId },
         { new: true }
       );
     } else {
@@ -188,8 +225,8 @@ export const submitQuestionnaireResponse = async (req, res, next) => {
         template: templateId,
         appointment: appointmentId,
         patient: req.user._id,
-        doctor: doctorId,
-        responses,
+        doctor: resolvedDoctorId,
+        responses: normalizedResponses,
         totalScore,
       });
     }

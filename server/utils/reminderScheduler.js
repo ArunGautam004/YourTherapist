@@ -1,7 +1,10 @@
 import Appointment from '../models/Appointment.js';
+import Message from '../models/Message.js';
 import { sendEmail } from '../utils/sendEmail.js';
 import { reminderEmail } from '../utils/emailTemplates.js';
 import { createNotification } from '../controllers/notificationController.js';
+
+const IST_OFFSET_MINUTES = 330;
 
 const getFrontendBaseUrl = () => {
   const direct = process.env.FRONTEND_URL || process.env.CLIENT_URL;
@@ -12,6 +15,33 @@ const getFrontendBaseUrl = () => {
   }
 
   return 'http://localhost:5173';
+};
+
+const formatDoctorLabel = (name = '') => {
+  const cleanName = String(name).replace(/^dr\.?\s*/i, '').trim();
+  return `Dr. ${cleanName}`;
+};
+
+const getISTDateParts = (date) => {
+  const shifted = new Date(date.getTime() + IST_OFFSET_MINUTES * 60000);
+  return {
+    year: shifted.getUTCFullYear(),
+    month: shifted.getUTCMonth(),
+    day: shifted.getUTCDate(),
+  };
+};
+
+const buildAppointmentDateTimeIST = (dateValue, timeValue) => {
+  const baseDate = new Date(dateValue);
+  const { year, month, day } = getISTDateParts(baseDate);
+
+  const [timePart, period] = (timeValue || '12:00 PM').split(' ');
+  let [h, m] = (timePart || '12:00').split(':').map(Number);
+  if (period === 'PM' && h !== 12) h += 12;
+  if (period === 'AM' && h === 12) h = 0;
+
+  const utcMs = Date.UTC(year, month, day, h || 0, m || 0) - IST_OFFSET_MINUTES * 60000;
+  return new Date(utcMs);
 };
 
 /**
@@ -36,9 +66,6 @@ export const startReminderScheduler = (io) => {
   const check = async () => {
     try {
       const now = new Date();
-      // Window: 8 to 12 minutes from now
-      const windowStart = new Date(now.getTime() + 8 * 60 * 1000);
-      const windowEnd   = new Date(now.getTime() + 12 * 60 * 1000);
 
       const candidates = await Appointment.find({
         paymentStatus: 'paid',
@@ -49,15 +76,11 @@ export const startReminderScheduler = (io) => {
         .populate('doctor',  'name email');
 
       for (const apt of candidates) {
-        // Reconstruct exact start datetime from stored date + time string (e.g. "3:00 PM")
-        const aptDate = new Date(apt.date);
-        const [timePart, period] = (apt.time || '').split(' ');
-        let [h, m] = (timePart || '0:0').split(':').map(Number);
-        if (period === 'PM' && h !== 12) h += 12;
-        if (period === 'AM' && h === 12) h = 0;
-        aptDate.setHours(h, m || 0, 0, 0);
+        const aptDate = buildAppointmentDateTimeIST(apt.date, apt.time);
+        const minutesUntil = Math.round((aptDate - now) / 60000);
 
-        if (aptDate < windowStart || aptDate > windowEnd) continue;
+        // Trigger around 10 minutes before start, with tolerance for 60s scheduler interval.
+        if (minutesUntil < 8 || minutesUntil > 12) continue;
 
         const baseUrl = getFrontendBaseUrl();
         const joinUrl  = `${baseUrl}${apt.meetingLink}`;
@@ -92,7 +115,7 @@ export const startReminderScheduler = (io) => {
             subject: '⏰ Session Starting in 10 Minutes — YourTherapist',
             htmlContent: reminderEmail(
               aptData,
-              apt.doctor.name.startsWith('Dr.') ? apt.doctor.name : `Dr. ${apt.doctor.name}`,
+              formatDoctorLabel(apt.doctor.name),
               joinUrl
             ),
           });
@@ -100,17 +123,50 @@ export const startReminderScheduler = (io) => {
           console.error(`Reminder email to doctor failed (${apt._id}):`, e.message);
         }
 
-        // 3. In-app notification → patient (with join link in meta)
+        // 3. Send meeting link in direct chat so patient can open it quickly.
+        try {
+          if (apt.meetingLink) {
+            const alreadySent = await Message.findOne({
+              sender: apt.doctor._id,
+              receiver: apt.patient._id,
+              text: { $regex: apt.meetingLink.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') },
+              createdAt: { $gte: new Date(now.getTime() - 20 * 60 * 1000) },
+            });
+
+            if (!alreadySent) {
+              const chatMessage = await Message.create({
+                sender: apt.doctor._id,
+                receiver: apt.patient._id,
+                text: `Your session starts in 10 minutes. Join here: ${joinUrl}`,
+              });
+
+              if (io) {
+                io.to(`user:${apt.patient._id}`).emit('message:receive', {
+                  _id: chatMessage._id,
+                  sender: apt.doctor._id,
+                  senderName: formatDoctorLabel(apt.doctor.name),
+                  receiver: apt.patient._id,
+                  text: chatMessage.text,
+                  createdAt: chatMessage.createdAt,
+                });
+              }
+            }
+          }
+        } catch (e) {
+          console.error(`Meeting link chat message failed (${apt._id}):`, e.message);
+        }
+
+        // 4. In-app notification → patient (with join link in meta)
         const patientNotif = await createNotification({
           userId: apt.patient._id,
           type:   'appointment_reminder',
           title:  '⏰ Session in 10 Minutes',
-          message: `Your session with Dr. ${apt.doctor.name} starts in 10 minutes.`,
+          message: `Your session with ${formatDoctorLabel(apt.doctor.name)} starts in 10 minutes.`,
           link:   apt.meetingLink,
           meta:   { appointmentId: apt._id, joinUrl },
         });
 
-        // 4. In-app notification → doctor
+        // 5. In-app notification → doctor
         const doctorNotif = await createNotification({
           userId: apt.doctor._id,
           type:   'appointment_reminder',
@@ -120,7 +176,7 @@ export const startReminderScheduler = (io) => {
           meta:   { appointmentId: apt._id, joinUrl },
         });
 
-        // 5. Push via socket if user is online
+        // 6. Push via socket if user is online
         if (io) {
           if (patientNotif) io.to(`user:${apt.patient._id}`).emit('notification:new', patientNotif);
           if (doctorNotif)  io.to(`user:${apt.doctor._id}`).emit('notification:new', doctorNotif);
