@@ -78,6 +78,158 @@ function generateTimeSlots(startTime, endTime) {
 // Helper: get socket.io instance stored on app
 const getIo = (req) => req.app.get('io');
 
+const finalizeAppointmentConfirmation = async (appointment, req) => {
+  const populatedAppointment = await Appointment.findById(appointment._id)
+    .populate('doctor', 'name specialization email')
+    .populate('patient', 'name email phone');
+
+  if (!populatedAppointment) {
+    throw new Error('Appointment not found during confirmation');
+  }
+
+  const dateStr = new Date(populatedAppointment.date).toLocaleDateString('en-IN', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+  });
+
+  const baseUrl = getFrontendBaseUrl();
+  const joinUrl = `${baseUrl}${populatedAppointment.meetingLink}`;
+
+  const aptData = {
+    patientName: populatedAppointment.patient.name,
+    doctorName: populatedAppointment.doctor.name,
+    dateStr,
+    time: populatedAppointment.time,
+    type: populatedAppointment.type,
+    fee: populatedAppointment.fee,
+  };
+
+  const io = getIo(req);
+
+  try {
+    await sendEmail({
+      to: populatedAppointment.patient.email,
+      subject: '✅ Appointment Confirmed — YourTherapist',
+      htmlContent: confirmationPatientEmail(aptData),
+    });
+  } catch (e) {
+    console.error('Patient confirmation email failed:', e.message);
+  }
+
+  try {
+    await sendEmail({
+      to: populatedAppointment.doctor.email,
+      subject: '📅 New Appointment Booked — YourTherapist',
+      htmlContent: confirmationDoctorEmail(aptData),
+    });
+  } catch (e) {
+    console.error('Doctor confirmation email failed:', e.message);
+  }
+
+  try {
+    const Message = (await import('../models/Message.js')).default;
+    const doctorLabel = formatDoctorLabel(populatedAppointment.doctor.name);
+
+    await Message.create({
+      sender: populatedAppointment.doctor._id,
+      receiver: populatedAppointment.patient._id,
+      text: `Hello ${populatedAppointment.patient.name} 👋, your appointment on ${dateStr} at ${populatedAppointment.time} has been confirmed. Looking forward to our session!`,
+    });
+
+    if (io) {
+      io.to(`user:${populatedAppointment.patient._id}`).emit('message:receive', {
+        sender: populatedAppointment.doctor._id,
+        senderName: doctorLabel,
+        text: `Your appointment on ${dateStr} at ${populatedAppointment.time} is confirmed.`,
+        createdAt: new Date(),
+      });
+    }
+  } catch (e) {
+    console.error('Auto-message failed:', e.message);
+  }
+
+  try {
+    const patientNotif = await createNotification({
+      userId: populatedAppointment.patient._id,
+      type: 'appointment_confirmed',
+      title: '✅ Appointment Confirmed',
+      message: `Your appointment with ${formatDoctorLabel(populatedAppointment.doctor.name)} on ${dateStr} at ${populatedAppointment.time} is confirmed.`,
+      link: '/patient/sessions',
+      meta: { appointmentId: populatedAppointment._id },
+    });
+    const doctorNotif = await createNotification({
+      userId: populatedAppointment.doctor._id,
+      type: 'appointment_confirmed',
+      title: '📅 New Appointment',
+      message: `${populatedAppointment.patient.name} booked a session on ${dateStr} at ${populatedAppointment.time}.`,
+      link: '/admin/calendar',
+      meta: { appointmentId: populatedAppointment._id },
+    });
+    if (io) {
+      if (patientNotif) io.to(`user:${populatedAppointment.patient._id}`).emit('notification:new', patientNotif);
+      if (doctorNotif) io.to(`user:${populatedAppointment.doctor._id}`).emit('notification:new', doctorNotif);
+    }
+  } catch (e) {
+    console.error('Notification failed:', e.message);
+  }
+
+  try {
+    const now = new Date();
+    const appointmentDateTime = new Date(populatedAppointment.date);
+    const parseTime = (timeStr) => {
+      const [time, period] = timeStr.split(' ');
+      let [h, m] = time.split(':').map(Number);
+      if (period === 'PM' && h !== 12) h += 12;
+      if (period === 'AM' && h === 12) h = 0;
+      return { h, m };
+    };
+    const { h, m } = parseTime(populatedAppointment.time);
+    appointmentDateTime.setHours(h, m, 0, 0);
+    const minutesUntil = (appointmentDateTime - now) / 60000;
+
+    if (minutesUntil > 0 && minutesUntil <= 30) {
+      try {
+        await sendEmail({
+          to: populatedAppointment.patient.email,
+          subject: '⏰ Your Session Starts Soon!',
+          htmlContent: `<p>Hi ${populatedAppointment.patient.name}, your session with ${formatDoctorLabel(populatedAppointment.doctor.name)} starts in ${Math.round(minutesUntil)} minutes. <a href="${joinUrl}">Join here</a></p>`,
+        });
+      } catch (e) {
+        console.error('Immediate reminder email failed:', e.message);
+      }
+
+      const immediatePatientNotif = await createNotification({
+        userId: populatedAppointment.patient._id,
+        type: 'appointment_reminder',
+        title: '🎥 Your Session is Starting Now',
+        message: `Your session with ${formatDoctorLabel(populatedAppointment.doctor.name)} is starting. Join now!`,
+        link: populatedAppointment.meetingLink,
+        meta: { appointmentId: populatedAppointment._id, joinUrl },
+      });
+
+      const immediateDoctorNotif = await createNotification({
+        userId: populatedAppointment.doctor._id,
+        type: 'appointment_reminder',
+        title: '🎥 Session Starting Now',
+        message: `${populatedAppointment.patient.name} just booked and the session is starting now!`,
+        link: populatedAppointment.meetingLink,
+        meta: { appointmentId: populatedAppointment._id, joinUrl },
+      });
+
+      if (io) {
+        if (immediatePatientNotif) io.to(`user:${populatedAppointment.patient._id}`).emit('notification:new', immediatePatientNotif);
+        if (immediateDoctorNotif) io.to(`user:${populatedAppointment.doctor._id}`).emit('notification:new', immediateDoctorNotif);
+      }
+
+      populatedAppointment.reminderSent = true;
+      await populatedAppointment.save();
+    }
+  } catch (e) {
+    console.error('Immediate reminder check failed:', e.message);
+  }
+
+  return populatedAppointment;
+};
+
 // @desc    Create Razorpay order — appointment stays 'pending' until payment verified
 // @route   POST /api/appointments
 export const createAppointment = async (req, res, next) => {
@@ -104,9 +256,33 @@ export const createAppointment = async (req, res, next) => {
     });
     if (existing) return res.status(400).json({ message: 'This time slot is already booked' });
 
-    const fee = type === 'chat'
+    const rawFee = type === 'chat'
       ? (doctorProfile?.chatFee ?? doctor.chatFee)
       : (doctorProfile?.consultationFee ?? doctor.consultationFee);
+
+    const fee = Number.isFinite(Number(rawFee)) ? Number(rawFee) : 0;
+
+    if (fee <= 0) {
+      const appointment = await Appointment.create({
+        patient: req.user._id,
+        doctor: doctorId,
+        date: new Date(date),
+        time,
+        type,
+        fee,
+        meetingLink: `/session/${uuidv4()}`,
+        status: 'scheduled',
+        paymentStatus: 'paid',
+      });
+
+      const confirmedAppointment = await finalizeAppointmentConfirmation(appointment, req);
+
+      return res.status(201).json({
+        message: 'Appointment confirmed successfully!',
+        paymentRequired: false,
+        appointment: confirmedAppointment,
+      });
+    }
 
     const razorpayOrder = await getRazorpay().orders.create({
       amount: fee * 100,
@@ -131,6 +307,7 @@ export const createAppointment = async (req, res, next) => {
 
     res.status(201).json({
       appointment,
+      paymentRequired: true,
       razorpayOrder: {
         id: razorpayOrder.id,
         amount: razorpayOrder.amount,
@@ -163,9 +340,7 @@ export const verifyPayment = async (req, res, next) => {
       return res.status(400).json({ message: 'Payment verification failed' });
     }
 
-    const appointment = await Appointment.findById(appointmentId)
-      .populate('doctor', 'name specialization email')
-      .populate('patient', 'name email phone');
+    const appointment = await Appointment.findById(appointmentId);
 
     if (!appointment) return res.status(404).json({ message: 'Appointment not found' });
 
@@ -174,149 +349,9 @@ export const verifyPayment = async (req, res, next) => {
     appointment.razorpaySignature = razorpay_signature;
     await appointment.save();
 
-    const dateStr = new Date(appointment.date).toLocaleDateString('en-IN', {
-      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
-    });
+    const confirmedAppointment = await finalizeAppointmentConfirmation(appointment, req);
 
-    const baseUrl = getFrontendBaseUrl();
-    const joinUrl = `${baseUrl}${appointment.meetingLink}`;
-
-    const aptData = {
-      patientName: appointment.patient.name,
-      doctorName: appointment.doctor.name,
-      dateStr,
-      time: appointment.time,
-      type: appointment.type,
-      fee: appointment.fee,
-    };
-
-    const io = getIo(req);
-
-    try {
-      await sendEmail({
-        to: appointment.patient.email,
-        subject: '✅ Appointment Confirmed — YourTherapist',
-        htmlContent: confirmationPatientEmail(aptData),
-      });
-    } catch (e) {
-      console.error('Patient confirmation email failed:', e.message);
-    }
-
-    try {
-      await sendEmail({
-        to: appointment.doctor.email,
-        subject: '📅 New Appointment Booked — YourTherapist',
-        htmlContent: confirmationDoctorEmail(aptData),
-      });
-    } catch (e) {
-      console.error('Doctor confirmation email failed:', e.message);
-    }
-
-    try {
-      const Message = (await import('../models/Message.js')).default;
-      const doctorLabel = formatDoctorLabel(appointment.doctor.name);
-
-      await Message.create({
-        sender: appointment.doctor._id,
-        receiver: appointment.patient._id,
-        text: `Hello ${appointment.patient.name} 👋, your appointment on ${dateStr} at ${appointment.time} has been confirmed. Looking forward to our session!`,
-      });
-
-      if (io) {
-        io.to(`user:${appointment.patient._id}`).emit('message:receive', {
-          sender: appointment.doctor._id,
-          senderName: doctorLabel,
-          text: `Your appointment on ${dateStr} at ${appointment.time} is confirmed.`,
-          createdAt: new Date(),
-        });
-      }
-    } catch (e) {
-      console.error('Auto-message failed:', e.message);
-    }
-
-    // In-app notifications
-    try {
-      const patientNotif = await createNotification({
-        userId: appointment.patient._id,
-        type: 'appointment_confirmed',
-        title: '✅ Appointment Confirmed',
-        message: `Your appointment with ${formatDoctorLabel(appointment.doctor.name)} on ${dateStr} at ${appointment.time} is confirmed.`,
-        link: '/patient/sessions',   // ✅ opens My Sessions, NOT the meeting link
-        meta: { appointmentId: appointment._id },
-      });
-      const doctorNotif = await createNotification({
-        userId: appointment.doctor._id,
-        type: 'appointment_confirmed',
-        title: '📅 New Appointment',
-        message: `${appointment.patient.name} booked a session on ${dateStr} at ${appointment.time}.`,
-        link: '/admin/calendar',
-        meta: { appointmentId: appointment._id },
-      });
-      if (io) {
-        if (patientNotif) io.to(`user:${appointment.patient._id}`).emit('notification:new', patientNotif);
-        if (doctorNotif) io.to(`user:${appointment.doctor._id}`).emit('notification:new', doctorNotif);
-      }
-    } catch (e) {
-      console.error('Notification failed:', e.message);
-    }
-
-    // Immediate reminder if session starts within 30 minutes
-    try {
-      const now = new Date();
-      const appointmentDateTime = new Date(appointment.date);
-      const parseTime = (timeStr) => {
-        const [time, period] = timeStr.split(' ');
-        let [h, m] = time.split(':').map(Number);
-        if (period === 'PM' && h !== 12) h += 12;
-        if (period === 'AM' && h === 12) h = 0;
-        return { h, m };
-      };
-      const { h, m } = parseTime(appointment.time);
-      appointmentDateTime.setHours(h, m, 0, 0);
-      const minutesUntil = (appointmentDateTime - now) / 60000;
-
-      if (minutesUntil > 0 && minutesUntil <= 30) {
-        try {
-          await sendEmail({
-            to: appointment.patient.email,
-            subject: '⏰ Your Session Starts Soon!',
-            htmlContent: `<p>Hi ${appointment.patient.name}, your session with ${formatDoctorLabel(appointment.doctor.name)} starts in ${Math.round(minutesUntil)} minutes. <a href="${joinUrl}">Join here</a></p>`,
-          });
-        } catch (e) {
-          console.error('Immediate reminder email failed:', e.message);
-        }
-
-        const immediatePatientNotif = await createNotification({
-          userId: appointment.patient._id,
-          type: 'appointment_reminder',
-          title: '🎥 Your Session is Starting Now',
-          message: `Your session with ${formatDoctorLabel(appointment.doctor.name)} is starting. Join now!`,
-          link: appointment.meetingLink,
-          meta: { appointmentId: appointment._id, joinUrl },
-        });
-
-        const immediateDoctorNotif = await createNotification({
-          userId: appointment.doctor._id,
-          type: 'appointment_reminder',
-          title: '🎥 Session Starting Now',
-          message: `${appointment.patient.name} just booked and the session is starting now!`,
-          link: appointment.meetingLink,
-          meta: { appointmentId: appointment._id, joinUrl },
-        });
-
-        if (io) {
-          if (immediatePatientNotif) io.to(`user:${appointment.patient._id}`).emit('notification:new', immediatePatientNotif);
-          if (immediateDoctorNotif) io.to(`user:${appointment.doctor._id}`).emit('notification:new', immediateDoctorNotif);
-        }
-
-        appointment.reminderSent = true;
-        await appointment.save();
-      }
-    } catch (e) {
-      console.error('Immediate reminder check failed:', e.message);
-    }
-
-    res.json({ message: 'Payment verified and appointment confirmed!', appointment });
+    res.json({ message: 'Payment verified and appointment confirmed!', appointment: confirmedAppointment });
   } catch (error) {
     next(error);
   }

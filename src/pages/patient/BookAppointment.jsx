@@ -126,6 +126,15 @@ const BookAppointment = () => {
         type: 'video',
       });
 
+      if (data.paymentRequired === false) {
+        setBookedAppointment(data.appointment);
+        setBookingSuccess(true);
+        setStep(4);
+        toast.success('Appointment confirmed successfully!');
+        setBooking(false);
+        return;
+      }
+
       const loaded = await loadRazorpayScript();
       if (!loaded) {
         toast.error('Razorpay failed to load.');
@@ -405,7 +414,16 @@ const BookAppointment = () => {
                   disabled={booking}
                   className="btn-primary flex-1 flex items-center justify-center gap-2 disabled:opacity-60"
                 >
-                  {booking ? <Loader2 className="w-5 h-5 animate-spin" /> : <><CreditCard className="w-5 h-5" /><span>Pay ₹{fee}</span></>}
+                  {booking ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : fee > 0 ? (
+                    <>
+                      <CreditCard className="w-5 h-5" />
+                      <span>Pay ₹{fee}</span>
+                    </>
+                  ) : (
+                    <span>Confirm Appointment</span>
+                  )}
                 </button>
               </div>
             </motion.div>
@@ -436,7 +454,7 @@ const BookAppointment = () => {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-text-secondary">Payment</span>
-                    <span className="font-semibold text-success">₹{fee} Paid ✓</span>
+                    <span className="font-semibold text-success">{fee > 0 ? `₹${fee} Paid ✓` : 'No payment required ✓'}</span>
                   </div>
                 </div>
               </div>
