@@ -272,11 +272,12 @@ export const updateProfile = async (req, res, next) => {
       if (req.body[field] !== undefined) updates[field] = req.body[field];
     });
 
-    // Auto-mark profile as completed when phone and profilePic are set
+    // Auto-mark profile as completed when phone, profilePic, and gender are set
     const currentUser = await User.findById(req.user._id);
     const finalPhone = updates.phone || currentUser.phone;
     const finalPic = updates.profilePic || currentUser.profilePic;
-    if (finalPhone && finalPic) {
+    const finalGender = updates.gender || currentUser.gender;
+    if (finalPhone && finalPic && finalGender) {
       updates.profileCompleted = true;
     }
 

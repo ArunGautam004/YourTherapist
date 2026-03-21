@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Camera, Phone, Loader2, Brain, CheckCircle2, Upload } from 'lucide-react';
+import { Camera, Phone, Loader2, Brain, CheckCircle2, Upload, VenusAndMars } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
 import { authAPI, uploadAPI } from '../services/api';
@@ -12,23 +12,28 @@ const CompleteProfile = () => {
     const [saving, setSaving] = useState(false);
     const [form, setForm] = useState({
         phone: user?.phone || '',
+        gender: user?.gender || '',
         profilePic: user?.profilePic || '',
     });
     const [uploadingImage, setUploadingImage] = useState(false);
     const fileInputRef = useRef(null);
 
-    const isValid = form.phone.trim().length >= 10 && form.profilePic.trim().length > 5;
+    const isValid =
+        form.phone.trim().length >= 10 &&
+        form.profilePic.trim().length > 5 &&
+        ['Male', 'Female', 'Other'].includes(form.gender);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         if (!isValid) {
-            toast.error('Please provide both a profile picture URL and a valid phone number');
+            toast.error('Please provide profile picture, valid phone number, and gender');
             return;
         }
         setSaving(true);
         try {
             const { data } = await authAPI.updateProfile({
                 phone: form.phone.trim(),
+                gender: form.gender,
                 profilePic: form.profilePic.trim(),
             });
             updateUser(data.user);
@@ -92,7 +97,7 @@ const CompleteProfile = () => {
                         </div>
                         <h1 className="font-display text-2xl font-bold text-text-primary mb-2">Complete Your Profile</h1>
                         <p className="text-text-secondary text-sm">
-                            For enhanced security and a better experience, please provide your profile picture and phone number.
+                            For enhanced security and a better experience, please provide your profile picture, phone number, and gender.
                         </p>
                     </div>
 
@@ -159,9 +164,28 @@ const CompleteProfile = () => {
                             </div>
                         </div>
 
+                        {/* Gender */}
+                        <div>
+                            <label className="text-sm font-medium text-text-secondary mb-1.5 block">Gender *</label>
+                            <div className="relative">
+                                <VenusAndMars className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-secondary/50" />
+                                <select
+                                    value={form.gender}
+                                    onChange={(e) => setForm({ ...form, gender: e.target.value })}
+                                    className="input-field !pl-10"
+                                    required
+                                >
+                                    <option value="">Select gender</option>
+                                    <option value="Male">Male</option>
+                                    <option value="Female">Female</option>
+                                    <option value="Other">Other</option>
+                                </select>
+                            </div>
+                        </div>
+
                         <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
                             <p className="text-xs text-amber-700">
-                                <strong>Why is this required?</strong> Profile picture and phone number are mandatory for identity verification and high authentication security.
+                                <strong>Why is this required?</strong> Profile picture, phone number, and gender are mandatory for identity verification and high authentication security.
                             </p>
                         </div>
 

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Brain, Mail, Lock, Eye, EyeOff, ArrowRight, Chrome, User, Phone, Loader2 } from 'lucide-react';
+import { Brain, Mail, Lock, Eye, EyeOff, ArrowRight, Chrome, User, Loader2 } from 'lucide-react';
 import { useGoogleLogin } from '@react-oauth/google';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
@@ -12,7 +12,7 @@ const Register = () => {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [formData, setFormData] = useState({
-    name: '', email: '', phone: '', password: '', confirmPassword: '', agreeTerms: false,
+    name: '', email: '', password: '', confirmPassword: '', agreeTerms: false,
   });
   const { register, loadUser, user } = useAuth();
   const navigate = useNavigate();
@@ -71,7 +71,6 @@ const Register = () => {
       const { data } = await api.post('/auth/register', {
         name: formData.name,
         email: formData.email,
-        phone: formData.phone,
         password: formData.password,
       });
 
@@ -194,34 +193,18 @@ const Register = () => {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-text-primary mb-2">Email</label>
-                <div className="relative">
-                  <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-secondary/50" />
-                  <input
-                    type="email"
-                    placeholder="Your email"
-                    value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    className="input-field !pl-12"
-                    required
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-text-primary mb-2">Phone</label>
-                <div className="relative">
-                  <Phone className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-secondary/50" />
-                  <input
-                    type="tel"
-                    placeholder="Your phone"
-                    value={formData.phone}
-                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                    className="input-field !pl-12"
-                    required
-                  />
-                </div>
+            <div>
+              <label className="block text-sm font-medium text-text-primary mb-2">Email</label>
+              <div className="relative">
+                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-secondary/50" />
+                <input
+                  type="email"
+                  placeholder="Your email"
+                  value={formData.email}
+                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  className="input-field !pl-12"
+                  required
+                />
               </div>
             </div>
 
