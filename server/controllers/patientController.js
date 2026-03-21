@@ -2,6 +2,25 @@ import User from '../models/User.js';
 import Appointment from '../models/Appointment.js';
 import SessionNote from '../models/SessionNote.js';
 import MoodEntry from '../models/MoodEntry.js';
+import PatientProfile from '../models/profiles/PatientProfile.js';
+
+const mergePatientWithProfile = (userDoc, profileDoc) => {
+  if (!userDoc) return null;
+  const user = userDoc.toObject ? userDoc.toObject() : userDoc;
+  const profile = profileDoc?.toObject ? profileDoc.toObject() : (profileDoc || {});
+
+  return {
+    ...user,
+    phone: profile.phone ?? user.phone ?? '',
+    profilePic: profile.profilePic ?? user.profilePic ?? '',
+    gender: profile.gender ?? user.gender ?? '',
+    dob: profile.dob ?? user.dob,
+    address: profile.address ?? user.address ?? '',
+    emergencyContact: profile.emergencyContact ?? user.emergencyContact ?? '',
+    riskLevel: profile.riskLevel ?? user.riskLevel ?? '',
+    diagnosis: profile.diagnosis ?? user.diagnosis ?? '',
+  };
+};
 
 // @desc    Get all patients for a doctor
 // @route   GET /api/patients
@@ -19,6 +38,8 @@ export const getPatients = async (req, res, next) => {
     }
 
     const patients = await User.find(userFilter).select('-password');
+    const profileDocs = await PatientProfile.find({ user: { $in: patients.map(p => p._id) } }).lean();
+    const profileMap = new Map(profileDocs.map(p => [String(p.user), p]));
 
     // Enrich with session data
     const enriched = await Promise.all(patients.map(async (patient) => {
@@ -48,7 +69,7 @@ export const getPatients = async (req, res, next) => {
         else if (recent < older - 0.5) moodTrend = 'down';
       }
 
-      const patientJson = patient.toJSON();
+      const patientJson = mergePatientWithProfile(patient, profileMap.get(String(patient._id)));
       // Prefer User model values (set by doctor via update API)
       // Fall back to latest session note if User value is blank
       const riskLevel = patientJson.riskLevel || latestNote?.riskLevel || 'low';
@@ -85,6 +106,9 @@ export const getPatientDetail = async (req, res, next) => {
     const patient = await User.findById(req.params.id).select('-password');
     if (!patient) return res.status(404).json({ message: 'Patient not found' });
 
+    const profile = await PatientProfile.findOne({ user: patient._id });
+    const mergedPatient = mergePatientWithProfile(patient, profile);
+
     const appointments = await Appointment.find({
       patient: req.params.id,
       doctor: req.user._id,
@@ -102,7 +126,7 @@ export const getPatientDetail = async (req, res, next) => {
 
     const sessionCount = appointments.length;
 
-    res.json({ patient, appointments, sessionNotes, moodEntries, sessionCount });
+    res.json({ patient: mergedPatient, appointments, sessionNotes, moodEntries, sessionCount });
   } catch (error) {
     next(error);
   }
@@ -122,6 +146,9 @@ export const getAllPatientsOnSite = async (req, res, next) => {
       .select('name email phone profilePic gender dob address emergencyContact riskLevel diagnosis createdAt')
       .sort({ createdAt: -1 });
 
+    const profileDocs = await PatientProfile.find({ user: { $in: patients.map(p => p._id) } }).lean();
+    const profileMap = new Map(profileDocs.map(p => [String(p.user), p]));
+
     // Enrich with session count and latest note for each patient
     const enriched = await Promise.all(patients.map(async (pt) => {
       const sessionCount = await Appointment.countDocuments({
@@ -136,7 +163,7 @@ export const getAllPatientsOnSite = async (req, res, next) => {
         .lean();
 
       return {
-        ...pt.toObject(),
+        ...mergePatientWithProfile(pt, profileMap.get(String(pt._id))),
         sessionCount,
         latestNote: latestNote || null,
       };
@@ -371,6 +398,17 @@ export const updatePatientInfo = async (req, res, next) => {
     if (riskLevel !== undefined) patient.riskLevel = riskLevel;
     if (diagnosis !== undefined) patient.diagnosis = diagnosis;
     await patient.save();
+
+    await PatientProfile.findOneAndUpdate(
+      { user: id },
+      {
+        $set: {
+          ...(riskLevel !== undefined ? { riskLevel } : {}),
+          ...(diagnosis !== undefined ? { diagnosis } : {}),
+        },
+      },
+      { upsert: true, returnDocument: 'after' }
+    );
 
     // Also sync to the latest SessionNote so history is consistent
     const latestNote = await SessionNote.findOne({

@@ -2,6 +2,7 @@ import Razorpay from 'razorpay';
 import crypto from 'crypto';
 import Appointment from '../models/Appointment.js';
 import User from '../models/User.js';
+import DoctorProfile from '../models/profiles/DoctorProfile.js';
 import { sendEmail } from '../utils/sendEmail.js';
 import { confirmationPatientEmail, confirmationDoctorEmail } from '../utils/emailTemplates.js';
 import { createNotification } from '../controllers/notificationController.js';
@@ -86,6 +87,8 @@ export const createAppointment = async (req, res, next) => {
     const doctor = await User.findOne({ _id: doctorId, role: 'doctor' });
     if (!doctor) return res.status(404).json({ message: 'Doctor not found' });
 
+    const doctorProfile = await DoctorProfile.findOne({ user: doctorId }).select('consultationFee chatFee');
+
     // ── Only PAID appointments block a slot ─────────────────────────────
     const dayStart = new Date(date);
     dayStart.setHours(0, 0, 0, 0);
@@ -101,7 +104,9 @@ export const createAppointment = async (req, res, next) => {
     });
     if (existing) return res.status(400).json({ message: 'This time slot is already booked' });
 
-    const fee = type === 'chat' ? doctor.chatFee : doctor.consultationFee;
+    const fee = type === 'chat'
+      ? (doctorProfile?.chatFee ?? doctor.chatFee)
+      : (doctorProfile?.consultationFee ?? doctor.consultationFee);
 
     const razorpayOrder = await getRazorpay().orders.create({
       amount: fee * 100,
@@ -452,6 +457,8 @@ export const getAvailableSlots = async (req, res, next) => {
     const doctor = await User.findById(doctorId);
     if (!doctor) return res.status(404).json({ message: 'Doctor not found' });
 
+    const doctorProfile = await DoctorProfile.findOne({ user: doctorId }).select('availableSlots');
+
     // Parse date as local calendar day to avoid UTC offset drift.
     const [year, month, day] = date.split('-').map(Number);
     if (!year || !month || !day) {
@@ -467,7 +474,9 @@ export const getAvailableSlots = async (req, res, next) => {
     };
     const requestedDay = normalizeDay(dayOfWeek);
 
-    const dayAvailability = (doctor.availableSlots || []).find((a) => {
+    const sourceSlots = doctorProfile?.availableSlots?.length ? doctorProfile.availableSlots : (doctor.availableSlots || []);
+
+    const dayAvailability = sourceSlots.find((a) => {
       const stored = normalizeDay(a?.day);
       const expanded = dayMap[stored] || stored;
       return expanded === requestedDay;

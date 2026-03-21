@@ -1,8 +1,17 @@
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 const ProtectedRoute = ({ children, allowedRoles }) => {
   const { user, loading } = useAuth();
+  const location = useLocation();
+
+  const hasCompletedMandatoryProfile = (u) => {
+    if (!u) return false;
+    const hasPhone = typeof u.phone === 'string' && u.phone.trim().length >= 10;
+    const hasProfilePic = typeof u.profilePic === 'string' && u.profilePic.trim().length > 5;
+    const hasGender = ['Male', 'Female', 'Other'].includes(u.gender);
+    return hasPhone && hasProfilePic && hasGender;
+  };
 
   if (loading) return null;
 
@@ -14,8 +23,8 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
     return <Navigate to="/" replace />;
   }
 
-  // Redirect to complete profile if not completed (skip for the complete-profile page itself)
-  if (user.profileCompleted === false && window.location.pathname !== '/complete-profile') {
+  // Force complete-profile for any user missing mandatory profile fields.
+  if (!hasCompletedMandatoryProfile(user) && location.pathname !== '/complete-profile') {
     return <Navigate to="/complete-profile" replace />;
   }
 

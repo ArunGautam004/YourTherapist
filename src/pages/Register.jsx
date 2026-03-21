@@ -17,10 +17,21 @@ const Register = () => {
   const { register, loadUser, user } = useAuth();
   const navigate = useNavigate();
 
+  const hasCompletedMandatoryProfile = (u) => {
+    if (!u) return false;
+    const hasPhone = typeof u.phone === 'string' && u.phone.trim().length >= 10;
+    const hasProfilePic = typeof u.profilePic === 'string' && u.profilePic.trim().length > 5;
+    const hasGender = ['Male', 'Female', 'Other'].includes(u.gender);
+    return hasPhone && hasProfilePic && hasGender;
+  };
+
   // Redirect if already logged in
   useEffect(() => {
     if (user) {
-      navigate(user.role === 'patient' ? '/patient/dashboard' : '/admin/dashboard', { replace: true });
+      const dest = hasCompletedMandatoryProfile(user)
+        ? (user.role === 'patient' ? '/patient/dashboard' : '/admin/dashboard')
+        : '/complete-profile';
+      navigate(dest, { replace: true });
     }
   }, [user, navigate]);
 

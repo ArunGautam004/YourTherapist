@@ -2,6 +2,7 @@ import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
 import Message from '../models/Message.js';
 import { sendEmail } from '../utils/sendEmail.js';
+import { syncRoleProfile } from '../utils/roleProfileSync.js';
 
 // Auto-create welcome conversation with the platform doctor
 const DOCTOR_EMAIL = 'doctor@youtherapist.com';
@@ -95,6 +96,8 @@ export const register = async (req, res, next) => {
       isVerified: false,
     });
 
+    await syncRoleProfile(user, req.body);
+
     // Try to send OTP email (don't block registration if Brevo is down)
     try {
       await sendOTPEmail(email, name, otp);
@@ -149,6 +152,7 @@ export const verifyOTP = async (req, res, next) => {
     user.otpExpiry = undefined;
     user.lastLogin = new Date();
     await user.save();
+    await syncRoleProfile(user);
 
     // Auto-create welcome conversation for patients
     if (user.role === 'patient') {
@@ -235,6 +239,7 @@ export const login = async (req, res, next) => {
 
     user.lastLogin = new Date();
     await user.save();
+    await syncRoleProfile(user);
 
     const token = generateToken(user._id);
 
@@ -282,6 +287,7 @@ export const updateProfile = async (req, res, next) => {
     }
 
     const user = await User.findByIdAndUpdate(req.user._id, updates, { new: true, runValidators: true });
+    await syncRoleProfile(user, updates);
     res.json({ user });
   } catch (error) {
     next(error);
@@ -319,6 +325,8 @@ export const googleLogin = async (req, res, next) => {
         isVerified: true, // Google users are pre-verified
       });
 
+      await syncRoleProfile(user, { profilePic: picture });
+
       // Auto-create welcome conversation for new Google patients
       createWelcomeConversation(user._id);
     } else {
@@ -326,6 +334,7 @@ export const googleLogin = async (req, res, next) => {
       if (!user.profilePic && picture) user.profilePic = picture;
       if (!user.isVerified) user.isVerified = true; // Auto-verify on Google login
       await user.save();
+      await syncRoleProfile(user, { profilePic: picture });
     }
 
     const token = generateToken(user._id);

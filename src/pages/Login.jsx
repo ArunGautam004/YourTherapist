@@ -15,10 +15,21 @@ const Login = () => {
   const { login, loadUser, user } = useAuth();
   const navigate = useNavigate();
 
+  const hasCompletedMandatoryProfile = (u) => {
+    if (!u) return false;
+    const hasPhone = typeof u.phone === 'string' && u.phone.trim().length >= 10;
+    const hasProfilePic = typeof u.profilePic === 'string' && u.profilePic.trim().length > 5;
+    const hasGender = ['Male', 'Female', 'Other'].includes(u.gender);
+    return hasPhone && hasProfilePic && hasGender;
+  };
+
   // Redirect if already logged in
   useEffect(() => {
     if (user) {
-      navigate(user.role === 'patient' ? '/patient/dashboard' : '/admin/dashboard', { replace: true });
+      const dest = hasCompletedMandatoryProfile(user)
+        ? (user.role === 'patient' ? '/patient/dashboard' : '/admin/dashboard')
+        : '/complete-profile';
+      navigate(dest, { replace: true });
     }
   }, [user, navigate]);
 
@@ -65,7 +76,10 @@ const Login = () => {
     try {
       const user = await login(formData.email, formData.password);
       toast.success(`Welcome back, ${user.name}!`);
-      navigate(user.role === 'doctor' ? '/admin/dashboard' : '/patient/dashboard');
+      const dest = hasCompletedMandatoryProfile(user)
+        ? (user.role === 'doctor' ? '/admin/dashboard' : '/patient/dashboard')
+        : '/complete-profile';
+      navigate(dest);
     } catch (error) {
       // Check if user needs to verify email first
       if (error.response?.data?.requiresVerification) {

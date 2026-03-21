@@ -16,6 +16,14 @@ const VerifyOTP = () => {
   const location = useLocation();
   const { loadUser } = useAuth();
 
+  const hasCompletedMandatoryProfile = (u) => {
+    if (!u) return false;
+    const hasPhone = typeof u.phone === 'string' && u.phone.trim().length >= 10;
+    const hasProfilePic = typeof u.profilePic === 'string' && u.profilePic.trim().length > 5;
+    const hasGender = ['Male', 'Female', 'Other'].includes(u.gender);
+    return hasPhone && hasProfilePic && hasGender;
+  };
+
   const email = location.state?.email;
 
   // Redirect if no email in state
@@ -78,7 +86,8 @@ const VerifyOTP = () => {
       localStorage.setItem('user', JSON.stringify(data.user));
       toast.success(data.message || 'Email verified successfully!');
       await loadUser();
-      navigate('/patient/dashboard', { replace: true });
+      const dest = hasCompletedMandatoryProfile(data.user) ? '/patient/dashboard' : '/complete-profile';
+      navigate(dest, { replace: true });
     } catch (error) {
       toast.error(error.response?.data?.message || 'Verification failed');
       setOtp(['', '', '', '', '', '']);

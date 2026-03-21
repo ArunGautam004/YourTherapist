@@ -7,7 +7,10 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "seed": "node seed.js"
+    "seed": "node seed.js",
+    "migrate:role-profiles": "node scripts/migrateRoleProfiles.js",
+    "cleanup:legacy-user-fields": "node scripts/cleanupLegacyUserFields.js",
+    "cleanup:legacy-user-fields:apply": "node scripts/cleanupLegacyUserFields.js --apply"
   },
   "keywords": [],
   "author": "",
