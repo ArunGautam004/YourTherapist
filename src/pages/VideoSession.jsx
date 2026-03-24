@@ -25,8 +25,8 @@ const buildRtcConfig = () => {
     .map(url => url.trim())
     .filter(Boolean);
 
-  const turnUsername = import.meta.env.VITE_TURN_USERNAME || '';
-  const turnCredential = import.meta.env.VITE_TURN_CREDENTIAL || '';
+  const turnUsername = import.meta.env.VITE_TURN_USERNAME;
+  const turnCredential = import.meta.env.VITE_TURN_CREDENTIAL;
   const iceTransportPolicy = (import.meta.env.VITE_ICE_TRANSPORT_POLICY || 'all').toLowerCase();
 
   // Comprehensive TURN servers with multiple ports and protocols for maximum compatibility
