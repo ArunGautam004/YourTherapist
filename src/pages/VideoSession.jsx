@@ -25,27 +25,43 @@ const buildRtcConfig = () => {
     .map(url => url.trim())
     .filter(Boolean);
 
-  const turnUrls = (import.meta.env.VITE_TURN_URLS || '')
-    .split(',')
-    .map(url => url.trim())
-    .filter(Boolean);
-
-  const turnUsername = import.meta.env.VITE_TURN_USERNAME;
-  const turnCredential = import.meta.env.VITE_TURN_CREDENTIAL;
+  const turnUsername = import.meta.env.VITE_TURN_USERNAME || '';
+  const turnCredential = import.meta.env.VITE_TURN_CREDENTIAL || 'L5zRIRrTEkEfXGFe';
   const iceTransportPolicy = (import.meta.env.VITE_ICE_TRANSPORT_POLICY || 'all').toLowerCase();
 
-  const iceServers = [{ urls: stunUrls }];
-  if (turnUrls.length && turnUsername && turnCredential) {
-    iceServers.push({
-      urls: turnUrls,
+  // Comprehensive TURN servers with multiple ports and protocols for maximum compatibility
+  const iceServers = [
+    { urls: stunUrls },
+    {
+      urls: 'stun:stun.relay.metered.ca:80',
+    },
+    {
+      urls: 'turn:global.relay.metered.ca:80',
       username: turnUsername,
       credential: turnCredential,
-    });
-  }
+    },
+    {
+      urls: 'turn:global.relay.metered.ca:80?transport=tcp',
+      username: turnUsername,
+      credential: turnCredential,
+    },
+    {
+      urls: 'turn:global.relay.metered.ca:443',
+      username: turnUsername,
+      credential: turnCredential,
+    },
+    {
+      urls: 'turns:global.relay.metered.ca:443?transport=tcp',
+      username: turnUsername,
+      credential: turnCredential,
+    },
+  ];
 
-  const hasTurn = turnUrls.length > 0 && !!turnUsername && !!turnCredential;
-  if (import.meta.env.PROD && !hasTurn) {
-    console.warn('[WebRTC] TURN is not configured. Video/audio may fail between different networks.');
+  const hasTurn = !!turnUsername && !!turnCredential;
+  if (hasTurn) {
+    console.log('[WebRTC] TURN servers configured with multiple ports and protocols');
+  } else {
+    console.warn('[WebRTC] TURN credentials not configured. Video may fail between different networks.');
   }
 
   return {
@@ -344,7 +360,7 @@ const VideoSession = () => {
 
     pc.oniceconnectionstatechange = async () => {
       if (pc.iceConnectionState === 'failed' && !rtcSetup.hasTurn) {
-        toast.error('Video connection failed: TURN server is not configured for production network routing.');
+        toast.error('Video connection failed: TURN server unavailable.');
       }
 
       if (pc.iceConnectionState !== 'failed' || didRetryIce.current) return;
@@ -463,7 +479,7 @@ const VideoSession = () => {
       setShowChat(false);
       if (data.templateId) {
         setActiveTemplateId(data.templateId);
-        activeTemplateIdRef.current = data.templateId; // ✅ keep ref in sync for submit handler
+        activeTemplateIdRef.current = data.templateId;
       }
       toast('Received a questionnaire from doctor', { icon: '📋' });
     };
