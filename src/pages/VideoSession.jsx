@@ -32,6 +32,7 @@ const buildRtcConfig = () => {
 
   const turnUsername = import.meta.env.VITE_TURN_USERNAME;
   const turnCredential = import.meta.env.VITE_TURN_CREDENTIAL;
+  const iceTransportPolicy = (import.meta.env.VITE_ICE_TRANSPORT_POLICY || 'all').toLowerCase();
 
   const iceServers = [{ urls: stunUrls }];
   if (turnUrls.length && turnUsername && turnCredential) {
@@ -42,13 +43,25 @@ const buildRtcConfig = () => {
     });
   }
 
+  const hasTurn = turnUrls.length > 0 && !!turnUsername && !!turnCredential;
+  if (import.meta.env.PROD && !hasTurn) {
+    console.warn('[WebRTC] TURN is not configured. Video/audio may fail between different networks.');
+  }
+
   return {
     iceServers,
     iceCandidatePoolSize: 10,
+    iceTransportPolicy: iceTransportPolicy === 'relay' ? 'relay' : 'all',
+    hasTurn,
   };
 };
 
-const servers = buildRtcConfig();
+const rtcSetup = buildRtcConfig();
+const rtcConfig = {
+  iceServers: rtcSetup.iceServers,
+  iceCandidatePoolSize: rtcSetup.iceCandidatePoolSize,
+  iceTransportPolicy: rtcSetup.iceTransportPolicy,
+};
 
 // Avatar shown when camera is off or while connecting
 const ParticipantAvatar = ({ name, role, profilePic, size = 'large' }) => {
@@ -296,7 +309,7 @@ const VideoSession = () => {
       return;
     }
 
-    const pc = new RTCPeerConnection(servers);
+    const pc = new RTCPeerConnection(rtcConfig);
     peerConnection.current = pc;
     isOfferSent.current = false;
     didRetryIce.current = false;
@@ -330,6 +343,10 @@ const VideoSession = () => {
     };
 
     pc.oniceconnectionstatechange = async () => {
+      if (pc.iceConnectionState === 'failed' && !rtcSetup.hasTurn) {
+        toast.error('Video connection failed: TURN server is not configured for production network routing.');
+      }
+
       if (pc.iceConnectionState !== 'failed' || didRetryIce.current) return;
       const isDoctor = user?.role === 'doctor' || user?.role === 'admin';
       if (!isDoctor) return;
