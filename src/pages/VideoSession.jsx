@@ -26,7 +26,7 @@ const buildRtcConfig = () => {
     .filter(Boolean);
 
   const turnUsername = import.meta.env.VITE_TURN_USERNAME || '';
-  const turnCredential = import.meta.env.VITE_TURN_CREDENTIAL || 'L5zRIRrTEkEfXGFe';
+  const turnCredential = import.meta.env.VITE_TURN_CREDENTIAL || '';
   const iceTransportPolicy = (import.meta.env.VITE_ICE_TRANSPORT_POLICY || 'all').toLowerCase();
 
   // Comprehensive TURN servers with multiple ports and protocols for maximum compatibility
@@ -332,14 +332,21 @@ const VideoSession = () => {
 
     if (localStream.current) {
       localStream.current.getTracks().forEach(track => {
+        console.log('[WebRTC] Adding local track to peer connection:', track.kind);
         pc.addTrack(track, localStream.current);
       });
+    } else {
+      console.warn('[WebRTC] Local stream not available');
     }
 
     pc.ontrack = (event) => {
+      console.log('[WebRTC] Received remote track:', event.track.kind);
       if (remoteVideoRef.current && event.streams[0]) {
+        console.log('[WebRTC] Attaching remote stream to video element');
         remoteVideoRef.current.srcObject = event.streams[0];
         setIsRemoteVideoActive(true);
+      } else {
+        console.warn('[WebRTC] Remote video ref or stream missing:', { ref: !!remoteVideoRef.current, stream: !!event.streams[0] });
       }
     };
 
@@ -350,15 +357,25 @@ const VideoSession = () => {
     };
 
     pc.onconnectionstatechange = () => {
+      console.log('[WebRTC] Connection state:', pc.connectionState);
+      
       if (pc.connectionState === 'connected') {
+        console.log('[WebRTC] Peer connection established!');
         setIsRemoteVideoActive(true);
         didRetryIce.current = false;
       } else if (['disconnected', 'failed', 'closed'].includes(pc.connectionState)) {
+        console.warn('[WebRTC] Connection lost:', pc.connectionState);
         setIsRemoteVideoActive(false);
       }
     };
 
     pc.oniceconnectionstatechange = async () => {
+      console.log('[WebRTC] ICE connection state:', pc.iceConnectionState);
+      
+      if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+        console.log('[WebRTC] ICE connection established!');
+      }
+      
       if (pc.iceConnectionState === 'failed' && !rtcSetup.hasTurn) {
         toast.error('Video connection failed: TURN server unavailable.');
       }
@@ -369,6 +386,7 @@ const VideoSession = () => {
 
       didRetryIce.current = true;
       try {
+        console.log('[WebRTC] Restarting ICE...');
         const restartOffer = await pc.createOffer({ iceRestart: true });
         await pc.setLocalDescription(restartOffer);
         socket.emit('call:offer', { roomId: signalRoomId, offer: restartOffer });
