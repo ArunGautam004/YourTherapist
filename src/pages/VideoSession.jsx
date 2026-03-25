@@ -33,25 +33,22 @@ const buildRtcConfig = () => {
   const iceServers = [
     { urls: stunUrls },
     {
-      urls: 'stun:stun.relay.metered.ca:80',
-    },
-    {
-      urls: 'turn:global.relay.metered.ca:80',
+      urls: 'turn:free.expressturn.com:3478',
       username: turnUsername,
       credential: turnCredential,
     },
     {
-      urls: 'turn:global.relay.metered.ca:80?transport=tcp',
+      urls: 'turn:free.expressturn.com:3478?transport=tcp',
       username: turnUsername,
       credential: turnCredential,
     },
     {
-      urls: 'turn:global.relay.metered.ca:443',
+      urls: 'turns:free.expressturn.com:5349',
       username: turnUsername,
       credential: turnCredential,
     },
     {
-      urls: 'turns:global.relay.metered.ca:443?transport=tcp',
+      urls: 'turns:free.expressturn.com:5349?transport=tcp',
       username: turnUsername,
       credential: turnCredential,
     },
