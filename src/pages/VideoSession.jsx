@@ -217,6 +217,8 @@ const VideoSession = () => {
   // Camera flip
   const [facingMode, setFacingMode] = useState('user');
   const [hasMultipleCameras, setHasMultipleCameras] = useState(false);
+  const videoDevicesRef = useRef([]);
+  const currentDeviceIndexRef = useRef(0);
 
   // Fullscreen & timer
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -303,7 +305,13 @@ const VideoSession = () => {
         try {
           const devices = await navigator.mediaDevices.enumerateDevices();
           const videoInputs = devices.filter(d => d.kind === 'videoinput');
+          videoDevicesRef.current = videoInputs;
           setHasMultipleCameras(videoInputs.length > 1);
+          // Find current device index
+          const currentTrack = stream.getVideoTracks()[0];
+          const currentDeviceId = currentTrack?.getSettings()?.deviceId;
+          const idx = videoInputs.findIndex(d => d.deviceId === currentDeviceId);
+          if (idx >= 0) currentDeviceIndexRef.current = idx;
         } catch {}
       } catch (err) {
         console.error('Media error:', err);
@@ -650,30 +658,43 @@ const VideoSession = () => {
   };
 
   const toggleCameraFlip = async () => {
-    const newMode = facingMode === 'user' ? 'environment' : 'user';
+    const devices = videoDevicesRef.current;
+    if (devices.length < 2) return;
     try {
+      // Cycle to next camera by deviceId (more reliable than facingMode)
+      const nextIndex = (currentDeviceIndexRef.current + 1) % devices.length;
+      const nextDeviceId = devices[nextIndex].deviceId;
       const newStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: newMode },
+        video: { deviceId: { exact: nextDeviceId } },
         audio: true,
       });
+      // Stop old video tracks
       localStream.current?.getVideoTracks().forEach(t => t.stop());
       const newVideoTrack = newStream.getVideoTracks()[0];
       const newAudioTrack = newStream.getAudioTracks()[0];
+      // Replace track in peer connection
       if (peerConnection.current) {
         const sender = peerConnection.current.getSenders().find(s => s.track?.kind === 'video');
-        if (sender && newVideoTrack) sender.replaceTrack(newVideoTrack);
+        if (sender && newVideoTrack) await sender.replaceTrack(newVideoTrack);
       }
+      // Keep existing audio track if new one wasn't acquired
+      const existingAudio = localStream.current?.getAudioTracks()[0];
       const updatedStream = new MediaStream();
       updatedStream.addTrack(newVideoTrack);
-      updatedStream.addTrack(newAudioTrack || localStream.current.getAudioTracks()[0]);
-      if (newAudioTrack) localStream.current?.getAudioTracks().forEach(t => t.stop());
+      if (newAudioTrack) {
+        updatedStream.addTrack(newAudioTrack);
+        existingAudio?.stop();
+      } else if (existingAudio) {
+        updatedStream.addTrack(existingAudio);
+      }
       localStream.current = updatedStream;
       if (localVideoRef.current) localVideoRef.current.srcObject = updatedStream;
-      setFacingMode(newMode);
-      toast.success(`Switched to ${newMode === 'user' ? 'front' : 'back'} camera`);
+      currentDeviceIndexRef.current = nextIndex;
+      setFacingMode(prev => prev === 'user' ? 'environment' : 'user');
+      toast.success(`Camera switched`);
     } catch (err) {
       console.error('Camera flip failed:', err);
-      toast.error('Failed to switch camera');
+      toast.error('Could not switch camera');
     }
   };
 
@@ -941,8 +962,8 @@ const VideoSession = () => {
 
   // ─── Video Session ────────────────────────────────────────────────────────
   return (
-    <div className="h-screen video-session-bg flex flex-col relative overflow-hidden">
-      <div className="flex-1 flex relative overflow-hidden">
+    <div className="h-screen video-session-bg flex flex-col overflow-hidden">
+      <div className="flex-1 flex relative overflow-hidden min-h-0">
         {/* Main Video Area (Remote) */}
         <div className="flex-1 relative">
           <video
@@ -1022,7 +1043,7 @@ const VideoSession = () => {
 
           {/* Remote participant name badge */}
           {isRemoteConnected && !showRemoteAvatar && (
-            <div className="absolute bottom-20 left-4 bg-black/40 backdrop-blur-md text-white text-sm px-3 py-1.5 rounded-xl flex items-center gap-2 z-10 border border-white/10">
+            <div className="absolute bottom-4 left-4 bg-black/40 backdrop-blur-md text-white text-sm px-3 py-1.5 rounded-xl flex items-center gap-2 z-10 border border-white/10">
               <div className="w-2 h-2 rounded-full bg-green-400 status-dot-connected" />
               {otherName}
               {!remoteAudioEnabled && <MicOff className="w-3.5 h-3.5 text-red-400" />}
@@ -1034,7 +1055,7 @@ const VideoSession = () => {
             initial={{ opacity: 0, scale: 0.8 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ delay: 0.3 }}
-            className="absolute bottom-20 right-4 w-44 sm:w-52 aspect-[4/3] rounded-2xl bg-black/50 overflow-hidden shadow-2xl border border-white/15 z-10 pip-glow"
+            className="absolute bottom-4 right-4 w-44 sm:w-52 aspect-[4/3] rounded-2xl bg-black/50 overflow-hidden shadow-2xl border border-white/15 z-10 pip-glow"
           >
             <video
               ref={localVideoRef}
@@ -1099,15 +1120,15 @@ const VideoSession = () => {
           </div>
         </div>
 
-        {/* Side Panel */}
+        {/* Side Panel — full overlay on mobile, 380px on desktop */}
         <AnimatePresence>
           {(showChat || showQuestionnaire || showNotes) && (
             <motion.div
-              initial={{ width: 0, opacity: 0 }}
-              animate={{ width: 380, opacity: 1 }}
-              exit={{ width: 0, opacity: 0 }}
-              transition={{ type: 'spring', damping: 25 }}
-              className="h-full bg-black/40 backdrop-blur-2xl border-l border-white/10 flex flex-col overflow-hidden shrink-0 dark-scrollbar"
+              initial={{ x: '100%', opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: '100%', opacity: 0 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              className="absolute sm:relative inset-0 sm:inset-auto w-full sm:w-[380px] h-full bg-gray-900/95 sm:bg-black/40 backdrop-blur-2xl sm:border-l border-white/10 flex flex-col overflow-hidden shrink-0 dark-scrollbar z-30 sm:z-auto"
             >
               {/* Panel Header */}
               <div className="flex items-center justify-between p-4 border-b border-white/10">
@@ -1156,7 +1177,7 @@ const VideoSession = () => {
                     })}
                     <div ref={chatBottomRef} />
                   </div>
-                  <div className="p-3 border-t border-gray-700">
+                  <div className="p-3 border-t border-white/10 mb-[72px] sm:mb-0">
                     <form onSubmit={handleSendMessage} className="flex items-center gap-2">
                       <input
                         type="text"
@@ -1497,13 +1518,13 @@ const VideoSession = () => {
         </AnimatePresence>
       </div>
 
-      {/* ─── Floating Control Bar ─────────────────────────────────────── */}
-      <div className="absolute bottom-0 left-0 right-0 flex justify-center pb-4 px-4 z-20">
+      {/* ─── Control Bar (in flow, not floating) ───────────────────────────── */}
+      <div className="flex justify-center py-3 px-4 bg-black/30 backdrop-blur-xl border-t border-white/5 shrink-0 z-20">
         <motion.div
-          initial={{ y: 30, opacity: 0 }}
+          initial={{ y: 10, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ delay: 0.2, type: 'spring', damping: 20 }}
-          className="flex items-center gap-1.5 sm:gap-2 bg-black/40 backdrop-blur-2xl border border-white/10 rounded-2xl px-3 sm:px-5 py-3 shadow-2xl"
+          className="flex items-center gap-1.5 sm:gap-2 bg-white/5 backdrop-blur-2xl border border-white/10 rounded-2xl px-3 sm:px-5 py-2.5 shadow-2xl"
         >
           {/* Media Controls */}
           <button
