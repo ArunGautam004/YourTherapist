@@ -64,7 +64,7 @@ const initSocket = (io) => {
     });
 
     // ── VIDEO CALL SIGNALING ─────────────────────────────────────────────
-    socket.on('call:join-room', async ({ roomId, role, userId, name }) => {
+    socket.on('call:join-room', async ({ roomId, role, userId, name, profilePic }) => {
       // ✅ Check session time window — only allow joining 10 min before to session end
       try {
         const apt = await Appointment.findOne({ meetingLink: `/session/${roomId}`, paymentStatus: 'paid' });
@@ -103,7 +103,8 @@ const initSocket = (io) => {
       const room = roomsMap.get(roomId);
       const isDoc = role === 'doctor' || role === 'admin';
 
-      room.participants.set(socket.id, { userId, name, role });
+      // Store participant data including profilePic for avatar display
+      room.participants.set(socket.id, { userId, name, role, profilePic });
 
       if (isDoc) {
         room.doctorId = socket.id;
@@ -118,10 +119,14 @@ const initSocket = (io) => {
 
       console.log(`📹 ${name || role} joined room ${roomId}`);
 
+      // Notify existing participants that someone joined (include profilePic)
       socket.to(roomId).emit('call:user-joined', {
-        participant: { userId, name, role, socketId: socket.id },
+        participant: { userId, name, role, socketId: socket.id, profilePic },
       });
 
+      // ✅ RECONNECTION FIX: When both participants are present, always emit
+      // call:ready so the doctor can create a fresh offer. This handles the
+      // case where one person left and rejoined.
       if (room.doctorId && room.patientId) {
         const participantList = Array.from(room.participants.values());
         io.to(roomId).emit('call:ready', { participants: participantList });
@@ -147,6 +152,12 @@ const initSocket = (io) => {
 
     socket.on('call:ice-candidate', ({ roomId, candidate }) => {
       socket.to(roomId).emit('call:ice-candidate', { candidate, from: socket.id });
+    });
+
+    // ── MEDIA TOGGLE (mic/video state) ──────────────────────────────────
+    // Relay media toggle events so remote side knows when camera/mic is off
+    socket.on('call:media-toggle', ({ roomId, kind, enabled }) => {
+      socket.to(roomId).emit('call:media-toggle', { kind, enabled, from: socket.id });
     });
 
     socket.on('call:end', (payload) => {
